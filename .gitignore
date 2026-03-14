@@ -1,0 +1,15 @@
+# PHP / project
+.env
+*.log
+vendor/
+node_modules/
+ 
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+ 
+# IDE
+.vscode/
+.idea/
+*.swp
