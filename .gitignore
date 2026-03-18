@@ -13,3 +13,18 @@ node_modules/
 .vscode/
 .idea/
 *.swp
+*.iml
+*.iws
+*.ipr
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.venv/
+venv/
