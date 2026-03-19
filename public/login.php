@@ -3,11 +3,10 @@
  * login.php — User login page.
  *
  * Handles both display of the login form and processing of POST submissions.
+ * Checks email verification and account approval state before allowing login.
  * On success, redirects admin users to /admin/users.php and regular users
  * to /dashboard.php.
  */
-ini_set('display_errors', 1);
-error_reporting(E_ALL);
 
 require_once __DIR__ . '/../src/auth.php';
 require_once __DIR__ . '/../src/db.php';
@@ -31,7 +30,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         $db   = get_db();
         $stmt = $db->prepare(
-            'SELECT user_id, username, password_hash, role, is_active
+            'SELECT user_id, username, password_hash, role,
+                    is_active, email_verified
              FROM users WHERE email = ?'
         );
         $stmt->execute([$email]);
@@ -39,27 +39,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (!$user || !password_verify($password, $user['password_hash'])) {
             $error = 'Invalid email address or password.';
-        } elseif (!$user['is_active']) {
-            $error = 'Your account is pending approval. Please check back later.';
         } else {
-            // Regenerate session ID on login to prevent session fixation
-            session_regenerate_id(true);
-            $_SESSION['user_id']       = $user['user_id'];
-            $_SESSION['username']      = $user['username'];
-            $_SESSION['role']          = $user['role'];
-            $_SESSION['last_activity'] = time();
-
-            // Update last login timestamp
-            $db->prepare('UPDATE users SET last_login_at = NOW() WHERE user_id = ?')
-               ->execute([$user['user_id']]);
-
-            // Role-based redirect
-            if ($user['role'] === 'admin') {
-                header('Location: /admin/users.php');
+            // Check email verification and account approval state
+            $state_error = get_login_error($user);
+            if ($state_error) {
+                $error = $state_error;
             } else {
-                header('Location: /dashboard.php');
+                // Regenerate session ID on login to prevent session fixation
+                session_regenerate_id(true);
+                $_SESSION['user_id']       = $user['user_id'];
+                $_SESSION['username']      = $user['username'];
+                $_SESSION['role']          = $user['role'];
+                $_SESSION['last_activity'] = time();
+
+                // Update last login timestamp
+                $db->prepare(
+                    'UPDATE users SET last_login_at = NOW() WHERE user_id = ?'
+                )->execute([$user['user_id']]);
+
+                // Role-based redirect
+                if ($user['role'] === 'admin') {
+                    header('Location: /admin/users.php');
+                } else {
+                    header('Location: /dashboard.php');
+                }
+                exit;
             }
-            exit;
         }
     }
 }
@@ -69,7 +74,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PORPASS — Login</title>
+    <title>PORPASS — Sign In</title>
     <link href="/resources/css/bootstrap.min.css" rel="stylesheet">
     <link href="/resources/css/porpass.css"       rel="stylesheet">
 </head>
@@ -85,7 +90,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                      class="mb-3"
                      style="max-height: 80px;">
                 <h1 class="h3">PORPASS</h1>
-                <p class="text-muted">Planetary Orbital Radar Processing and Submission System</p>
+                <p class="text-muted">
+                    Planetary Orbital Radar Processing and Simulation System
+                </p>
             </div>
 
             <div class="card shadow-sm">
@@ -95,30 +102,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <?php if ($error): ?>
                         <div class="alert alert-danger" role="alert">
                             <?= htmlspecialchars($error) ?>
+                            <?php if (str_contains($error, 'verify your email')): ?>
+                                <hr>
+                                <a href="/auth/verify.php" class="alert-link">
+                                    Resend verification email
+                                </a>
+                            <?php endif; ?>
                         </div>
                     <?php endif; ?>
 
                     <form method="POST" action="/login.php" novalidate>
                         <div class="mb-3">
                             <label for="email" class="form-label">Email address</label>
-                            <input
-                                type="email"
-                                class="form-control"
-                                id="email"
-                                name="email"
-                                value="<?= htmlspecialchars($_POST['email'] ?? '') ?>"
-                                required
-                                autofocus>
+                            <input type="email"
+                                   class="form-control"
+                                   id="email"
+                                   name="email"
+                                   value="<?= htmlspecialchars($_POST['email'] ?? '') ?>"
+                                   required
+                                   autofocus>
                         </div>
 
                         <div class="mb-3">
                             <label for="password" class="form-label">Password</label>
-                            <input
-                                type="password"
-                                class="form-control"
-                                id="password"
-                                name="password"
-                                required>
+                            <input type="password"
+                                   class="form-control"
+                                   id="password"
+                                   name="password"
+                                   required>
                         </div>
 
                         <div class="d-grid mb-3">

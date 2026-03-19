@@ -31,7 +31,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // Fetch all users
 $users = $db->query(
     'SELECT u.user_id, u.username, u.email, u.role, u.is_active,
-            u.created_at, u.last_login_at, i.institution_abbr
+            u.email_verified, u.created_at, u.last_login_at,
+            i.institution_abbr
      FROM users u
      LEFT JOIN institutions i ON u.institution_id = i.institution_id
      ORDER BY u.is_active ASC, u.created_at DESC'
@@ -55,6 +56,7 @@ open_layout('Manage Users');
             <tr>
                 <th>Username</th>
                 <th>Email</th>
+                <th>Status</th>
                 <th>Institution</th>
                 <th>Role</th>
                 <th>Status</th>
@@ -68,6 +70,13 @@ open_layout('Manage Users');
             <tr>
                 <td><?= htmlspecialchars($u['username']) ?></td>
                 <td><?= htmlspecialchars($u['email']) ?></td>
+                <td>
+                    <?php if ($u['email_verified']): ?>
+                        <span class="badge bg-success">Verified</span>
+                    <?php else: ?>
+                        <span class="badge bg-secondary">Unverified</span>
+                    <?php endif; ?>
+                </td>
                 <td><?= htmlspecialchars($u['institution_abbr'] ?? '—') ?></td>
                 <td>
                     <span class="badge <?= $u['role'] === 'admin' ? 'bg-danger' : 'bg-secondary' ?>">
