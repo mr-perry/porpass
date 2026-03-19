@@ -10,9 +10,8 @@
 
 require_once __DIR__ . '/../src/auth.php';
 require_once __DIR__ . '/../src/db.php';
-
-ini_set('display_errors', 1);
-error_reporting(E_ALL);
+require_once __DIR__ . '/../src/mailer.php';
+require_once __DIR__ . '/../vendor/autoload.php';
 
 session_start_secure();
 
@@ -113,12 +112,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $final_dept_id = $dept_id;
         }
 
+        // Generate email verification token
+        $raw_token    = bin2hex(random_bytes(32));
+        $hashed_token = hash('sha256', $raw_token);
+        $expires      = date('Y-m-d H:i:s', time() + 86400); // 24 hours
+
         $stmt = $db->prepare(
             'INSERT INTO users
                 (first_name, last_name, username, email, password_hash,
                  institution_id, department_id, access_reason,
-                 role, is_active)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, \'user\', 0)'
+                 role, is_active, email_verified,
+                 email_verify_token, email_verify_expires)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, \'user\', 0, 0, ?, ?)'
         );
         $stmt->execute([
             $first_name,
@@ -129,7 +134,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $inst_id ?: null,
             $final_dept_id,
             $access_reason,
+            $hashed_token,
+            $expires,
         ]);
+
+        // Send verification email
+        $name = trim($first_name . ' ' . $last_name);
+        send_email_verification($email, $name, $raw_token);
 
         $success = true;
         $old     = [];
@@ -173,15 +184,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div class="alert alert-success">
                     <h4 class="alert-heading">Request Submitted</h4>
                     <p>
-                        Thank you for registering. Your account is pending administrator
-                        approval. You will be able to sign in once your request has been
-                        reviewed.
+                        Thank you for registering. We have sent a verification email
+                        to your address — please click the link in that email to verify
+                        your account.
+                    </p>
+                    <p class="mb-0">
+                        Once your email is verified, your account will be reviewed and
+                        approved by a PORPASS administrator before you can sign in.
                     </p>
                     <?php if (isset($inst_id) && $inst_id > 0): ?>
-                    <p class="mb-0 small">
+                    <p class="mb-0 small mt-2">
                         If you submitted a new institution or department, these will also
-                        be reviewed by an administrator before appearing in the dropdown
-                        for future users.
+                        be reviewed by an administrator.
                     </p>
                     <?php endif; ?>
                     <a href="/login.php" class="btn btn-success btn-sm mt-3">Go to Sign In</a>
