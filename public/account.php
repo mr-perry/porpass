@@ -31,7 +31,7 @@ $stmt = $db->prepare(
             d.department, d.department_abbr
      FROM users u
      LEFT JOIN institutions i ON u.institution_id = i.institution_id
-     LEFT JOIN institutions d ON u.department_id  = d.institution_id
+     LEFT JOIN departments d  ON u.department_id  = d.department_id
      WHERE u.user_id = ?'
 );
 $stmt->execute([$user_id]);
@@ -238,11 +238,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $final_dept_id = null;
             if ($dept_id === -1 && !empty($dept_other)) {
                 $db->prepare(
-                    'INSERT INTO institutions
-                        (institution, institution_abbr, department, is_approved, created_by)
-                     SELECT institution, institution_abbr, ?, 0, ?
-                     FROM institutions WHERE institution_id = ?'
-                )->execute([$dept_other, $user_id, $inst_id]);
+                    'INSERT INTO departments
+                        (institution_id, department, is_approved, created_by)
+                     VALUES (?, ?, 0, ?)'
+                )->execute([$inst_id, $dept_other, $user_id]);
                 $final_dept_id = (int)$db->lastInsertId();
             } elseif ($dept_id > 0) {
                 $final_dept_id = $dept_id;
@@ -634,7 +633,7 @@ function fetchDepartments(institutionId) {
             data.forEach(dept => {
                 if (dept.department) {
                     const opt       = document.createElement('option');
-                    opt.value       = dept.institution_id;
+                    opt.value       = dept.department_id;
                     opt.textContent = dept.department +
                         (dept.department_abbr ? ' (' + dept.department_abbr + ')' : '');
                     deptSelect.insertBefore(opt, deptSelect.lastElementChild);

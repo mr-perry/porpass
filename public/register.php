@@ -96,17 +96,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $inst_id = (int)$db->lastInsertId();
         }
 
-        // Handle "Other" department — insert pending row under same institution
+        // Handle "Other" department — insert pending row into departments table
         $final_dept_id = null;
         if ($dept_id === -1 && !empty($dept_other)) {
-            // Copy institution/abbreviation from parent row, add department
             $stmt = $db->prepare(
-                'INSERT INTO institutions
-                    (institution, institution_abbr, department, is_approved, created_by)
-                 SELECT institution, institution_abbr, ?, 0, NULL
-                 FROM institutions WHERE institution_id = ?'
+                'INSERT INTO departments
+                    (institution_id, department, is_approved, created_by)
+                 VALUES (?, ?, 0, NULL)'
             );
-            $stmt->execute([$dept_other, $inst_id]);
+            $stmt->execute([$inst_id, $dept_other]);
             $final_dept_id = (int)$db->lastInsertId();
         } elseif ($dept_id > 0) {
             $final_dept_id = $dept_id;
@@ -449,7 +447,7 @@ function fetchDepartments(institutionId) {
             data.forEach(dept => {
                 if (dept.department) {
                     const opt       = document.createElement('option');
-                    opt.value       = dept.institution_id;
+                    opt.value       = dept.department_id;
                     opt.textContent = dept.department +
                         (dept.department_abbr ? ' (' + dept.department_abbr + ')' : '');
                     deptSelect.insertBefore(opt, deptSelect.lastElementChild);
