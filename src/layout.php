@@ -81,6 +81,9 @@ function open_layout(string $title = 'PORPASS'): void {
                     </a>
                     <ul class="dropdown-menu dropdown-menu-end dropdown-menu-dark">
                         <li>
+                            <a class="dropdown-item" href="/admin/admin_dashboard.php">Analytics Dashboard</a>
+                        </li>
+                        <li>
                             <a class="dropdown-item" href="/admin/users.php">Manage Users</a>
                         </li>
                         <li>
