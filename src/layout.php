@@ -92,6 +92,9 @@ function open_layout(string $title = 'PORPASS'): void {
                         <li>
                             <a class="dropdown-item" href="/admin/institutions.php">Manage Institutions</a>
                         </li>
+                        <li>
+                            <a class="dropdown-item" href="/admin/change_requests.php">Change Requests</a>
+                        </li>
                         <li><hr class="dropdown-divider"></li>
                         <li>
                             <a class="dropdown-item" href="/admin/docs.php">Admin Documentation</a>
