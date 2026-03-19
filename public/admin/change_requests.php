@@ -81,14 +81,20 @@ $pending = $db->query(
             u.username, u.first_name, u.last_name, u.email,
             i_old.institution    AS old_institution,
             i_old.institution_abbr AS old_institution_abbr,
-            i_old.department     AS old_department,
+            d_old.department     AS old_department,
             i_new.institution    AS new_institution,
             i_new.institution_abbr AS new_institution_abbr,
-            i_new.department     AS new_department
+            d_new.department     AS new_department
      FROM user_change_requests cr
      JOIN users u ON cr.user_id = u.user_id
-     LEFT JOIN institutions i_old ON cr.old_value = i_old.institution_id
-     LEFT JOIN institutions i_new ON cr.new_value = i_new.institution_id
+     LEFT JOIN institutions i_old ON cr.field = \'institution_id\'
+                                  AND cr.old_value = i_old.institution_id
+     LEFT JOIN institutions i_new ON cr.field = \'institution_id\'
+                                  AND cr.new_value = i_new.institution_id
+     LEFT JOIN departments d_old  ON cr.field = \'department_id\'
+                                  AND cr.old_value = d_old.department_id
+     LEFT JOIN departments d_new  ON cr.field = \'department_id\'
+                                  AND cr.new_value = d_new.department_id
      WHERE cr.status = \'pending\'
        AND cr.field IN (\'institution_id\', \'department_id\')
      ORDER BY cr.requested_at ASC'
@@ -178,11 +184,6 @@ open_layout('Change Requests');
                         <?= $req['new_institution_abbr']
                             ? '(' . htmlspecialchars($req['new_institution_abbr']) . ')'
                             : '' ?>
-                        <?php if (!$req['new_institution_abbr']): ?>
-                            <span class="badge bg-warning text-dark ms-1">
-                                Pending institution approval
-                            </span>
-                        <?php endif; ?>
                     <?php else: ?>
                         <em class="text-muted">Institution ID: <?= htmlspecialchars($req['new_value']) ?></em>
                     <?php endif; ?>

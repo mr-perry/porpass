@@ -1,13 +1,16 @@
 <?php
 /**
- * departments.php — JSON endpoint returning departments for a given institution.
+ * departments.php — JSON endpoint returning approved departments for a given institution.
  *
- * Called via fetch() from the registration form when a user selects an
- * institution. Returns an array of matching institution rows where
- * department is not null.
+ * Called via fetch() from the registration and account settings forms when a
+ * user selects an institution. Returns an array of approved department rows
+ * belonging to the specified institution.
  *
  * Query parameters:
- *   institution_id (int) — the institution_id to filter by
+ *   institution_id (int) — the institution_id to filter departments by
+ *
+ * Returns:
+ *   JSON array of objects with keys: department_id, department, department_abbr
  */
 
 require_once __DIR__ . '/../../src/db.php';
@@ -23,14 +26,11 @@ if ($institution_id <= 0) {
 
 $db   = get_db();
 $stmt = $db->prepare(
-    'SELECT institution_id, department, department_abbr
-     FROM institutions
-     WHERE institution_abbr = (
-         SELECT institution_abbr FROM institutions WHERE institution_id = ?
-     )
-     AND department IS NOT NULL
-     AND is_approved = 1
+    'SELECT department_id, department, department_abbr
+     FROM departments
+     WHERE institution_id = ?
+       AND is_approved = 1
      ORDER BY department'
 );
-$stmt->execute([$institution_id, $institution_id]);
+$stmt->execute([$institution_id]);
 echo json_encode($stmt->fetchAll());
