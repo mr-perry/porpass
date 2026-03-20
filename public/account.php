@@ -598,7 +598,6 @@ open_layout('Account Settings');
 </div>
 </div>
 
-<script src="/resources/js/bootstrap.bundle.min.js"></script>
 <script>
 const instSelect     = document.getElementById('institution_id');
 const instOtherWrap  = document.getElementById('institution_other_wrap');
