@@ -1,3 +1,6 @@
+# Other
+logs/
+
 # PHP / project
 .env
 *.log

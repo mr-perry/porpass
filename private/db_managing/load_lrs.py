@@ -11,7 +11,11 @@ Usage:
 Options:
     --dry-run          Execute queries but roll back at the end (default: False)
     --limit N          Process only the first N date directories (useful for testing)
-    --log-file PATH    Write log output to this file in addition to the console
+    --log-file PATH    Write log output to this file in addition to the console.
+                       The file receives DEBUG-level output (more verbose than the
+                       console, which shows INFO and above). Any text written to
+                       stderr by third-party libraries (SpiceyPy, GRaSP C extensions,
+                       etc.) is also captured in the log at WARNING level.
 
 Examples:
     Dry run — validates without writing to the database::
@@ -35,8 +39,10 @@ import logging
 import os
 import sys
 import argparse
+import traceback
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from shapely.geometry import LineString
 import pymysql as sql
@@ -66,23 +72,80 @@ INSERT_QRY  = '''INSERT INTO observations
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
+class _TeeStream:
+    """Write to both a stream and a logging.Logger at a given level.
+
+    Used to redirect sys.stderr into the log so that output from C extensions,
+    SpiceyPy, or any other code that writes directly to stderr is captured.
+    """
+
+    def __init__(self, original_stream, logger, level=logging.WARNING):
+        self._stream = original_stream
+        self._logger = logger
+        self._level  = level
+        self._buf    = ''
+
+    def write(self, msg):
+        self._stream.write(msg)
+        self._stream.flush()
+        self._buf += msg
+        while '\n' in self._buf:
+            line, self._buf = self._buf.split('\n', 1)
+            line = line.rstrip()
+            if line:
+                self._logger.log(self._level, '[stderr] %s', line)
+
+    def flush(self):
+        self._stream.flush()
+
+    def fileno(self):          # needed by some C extensions
+        return self._stream.fileno()
+
+    def isatty(self):
+        return self._stream.isatty()
+
+
 def setup_logging(log_file=None):
     """Configure logging to the console and optionally to a file.
 
-    Sets up the root logger with a timestamped format. If a log file path is
-    provided, output is written to both the console and the file simultaneously.
+    Attaches handlers directly to the root logger rather than using
+    ``basicConfig``, so the configuration takes effect even if an imported
+    library (e.g. GRaSP, SpiceyPy, pandas) has already attached its own
+    handler and made ``basicConfig`` a no-op.
+
+    Also redirects ``sys.stderr`` through a tee so that any output written
+    directly to stderr by C extensions or third-party libraries is captured
+    in the log at WARNING level.
 
     Args:
         log_file (Path or None): If provided, log output is also written to
-            this file. The file is created or appended to if it already exists.
-            If None, output goes to the console only. Defaults to None.
+            this file (appended if it already exists). If None, output goes
+            to the console only. Defaults to None.
     """
     fmt     = '%(asctime)s  %(levelname)-8s  %(message)s'
     datefmt = '%Y-%m-%d %H:%M:%S'
-    handlers = [logging.StreamHandler()]
+    formatter = logging.Formatter(fmt, datefmt=datefmt)
+
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+
+    # Remove any handlers that imported libraries may have already registered,
+    # then re-add ours so format and level are fully under our control.
+    root.handlers.clear()
+
+    console = logging.StreamHandler(sys.stdout)
+    console.setLevel(logging.INFO)
+    console.setFormatter(formatter)
+    root.addHandler(console)
+
     if log_file:
-        handlers.append(logging.FileHandler(log_file))
-    logging.basicConfig(level=logging.INFO, format=fmt, datefmt=datefmt, handlers=handlers)
+        fh = logging.FileHandler(log_file, mode='a', encoding='utf-8')
+        fh.setLevel(logging.DEBUG)   # capture DEBUG-level detail in the file
+        fh.setFormatter(formatter)
+        root.addHandler(fh)
+
+    # Redirect stderr so that C-level / SpiceyPy / GRaSP prints are captured.
+    sys.stderr = _TeeStream(sys.__stderr__, root, level=logging.WARNING)
 
 
 # ── Database ──────────────────────────────────────────────────────────────────
@@ -180,7 +243,17 @@ def process_file(sci_file, cursor, spice, inst_id, body_id):
         utc=spice['utc'],
     )
     geom   = grasp.compute_geometry(vctrs.r_t, vctrs.r_s, vctrs.r_st)
-    coords = [(lon, lat) for lon, lat in zip(geom.longitude, geom.latitude)]
+
+    lon = np.atleast_1d(geom.longitude)
+    lat = np.atleast_1d(geom.latitude)
+    if len(lon) < 2:
+        logging.warning(
+            "SKIP %s: only %d data record(s) — need ≥ 2 for a valid LineString",
+            sci_file.name, len(lon),
+        )
+        return False
+
+    coords = [(lo, la) for lo, la in zip(lon, lat)]
     line   = LineString(coords)
 
     native_id = sci_file.stem  # basename without extension
@@ -191,10 +264,10 @@ def process_file(sci_file, cursor, spice, inst_id, body_id):
         native_id,
         pd.Timestamp(et[0]),
         pd.Timestamp(et[-1]),
-        float(geom.latitude[0]),
-        float(geom.longitude[0]),
-        float(geom.latitude[-1]),
-        float(geom.longitude[-1]),
+        float(lat[0]),
+        float(lon[0]),
+        float(lat[-1]),
+        float(lon[-1]),
         line.wkt,
         None,  # science_file_id — deferred until files table is implemented
     ))
@@ -260,25 +333,42 @@ def load_lrs(dry_run=False, limit=None, log_file=None):
     logging.info(f"Processing {len(date_dirs)} date directories...")
 
     # Import loop
-    n_success = 0
-    n_failed  = 0
-    n_total   = 0
+    n_success   = 0
+    n_duplicate = 0
+    n_skipped   = 0
+    n_failed    = 0
+    n_total     = 0
 
     for date_dir in date_dirs:
         sci_files = sorted(date_dir.glob(DATA_GLOB))
         for sci_file in sci_files:
             n_total += 1
             try:
-                process_file(sci_file, cursor, spice, INST_ID, BODY_ID)
-                n_success += 1
-                logging.info(f"  OK  {sci_file.name}")
+                result = process_file(sci_file, cursor, spice, INST_ID, BODY_ID)
+                if result:
+                    n_success += 1
+                    logging.info(f"  OK        {sci_file.name}")
+                else:
+                    n_skipped += 1
+            except sql.IntegrityError:
+                n_duplicate += 1
+                logging.info(f"  DUPLICATE {sci_file.name}")
+                continue
             except Exception as e:
                 n_failed += 1
-                logging.warning(f"  FAIL {sci_file.name}: {e}")
+                logging.warning(
+                    "  FAIL %s: %s\n%s",
+                    sci_file.name,
+                    e,
+                    traceback.format_exc().rstrip(),
+                )
                 continue
 
     # Commit or rollback
-    logging.info(f"Results: {n_success} succeeded, {n_failed} failed out of {n_total} total.")
+    logging.info(
+        f"Results: {n_success} inserted, {n_duplicate} duplicate, "
+        f"{n_skipped} skipped, {n_failed} failed out of {n_total} total."
+    )
     if dry_run:
         logging.info("Dry run complete — rolling back.")
         cnx.rollback()
