@@ -30,9 +30,6 @@ Examples:
 
         python load_lrs.py --log-file /tmp/lrs_import.log
 
-Note:
-    science_file_id is set to NULL for all inserted rows until the PORPASS
-    files table is designed and implemented.
 """
 
 import logging
@@ -44,6 +41,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from pyproj import Geod
 from shapely.geometry import LineString
 import pymysql as sql
 from dotenv import load_dotenv
@@ -58,16 +56,16 @@ import grasp
 ENV_PATH    = Path(__file__).resolve().parents[2] / '.env'
 MK_FILE     = Path("/Volumes/data/NAIF/pds/sln-l-spice-6-v1.0/slnsp_1000/extras/mk/SEL_V02.TM")
 LRS_ARCHIVE = Path("/Volumes/data/SELENE/lrs/darts/sln-l-lrs-2-sndr-waveform-high-v1.0/")
+LRS_MODE = "SW"
 DATA_GLOB   = os.path.join("data", "LRS_??_??_*.tbl")
 INST_ID     = 1   # LRS instrument_id in porpass_dev
 BODY_ID     = 3   # Moon body_id in porpass_dev
 METHOD      = "NEAR POINT/ELLIPSOID"
 
 INSERT_QRY  = '''INSERT INTO observations
-    (instrument_id, body_id, native_id, start_time, end_time,
-     start_lat, start_lon, end_lat, end_lon,
-     observation_geometry, science_file_id)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, ST_GeomFromText(%s, 0), %s)'''
+    (instrument_id, body_id, native_id, start_time, stop_time,
+     duration, length_km, geometry)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, ST_GeomFromText(%s, 0))'''
 
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -206,13 +204,63 @@ def setup_spice(mk_file):
 
 # ── Import ────────────────────────────────────────────────────────────────────
 
-def process_file(sci_file, cursor, spice, inst_id, body_id):
+def get_body_radii(cursor, body_id):
+    """Query the bodies table and return a pyproj Geod for the given body.
+
+    Retrieves the equatorial and polar radii from the PORPASS bodies table and
+    constructs a pyproj Geod object representing the body's ellipsoid. This is
+    used to compute accurate geodesic ground track lengths.
+
+    Args:
+        cursor (pymysql.cursors.Cursor): An open database cursor.
+        body_id (int): The body_id to look up in the bodies table.
+
+    Returns:
+        pyproj.Geod: A Geod object initialised with the body's ellipsoid.
+
+    Raises:
+        ValueError: If no body with the given body_id exists in the table.
+    """
+    cursor.execute(
+        'SELECT equatorial_radius_km, polar_radius_km FROM bodies WHERE body_id = %s',
+        (body_id,)
+    )
+    row = cursor.fetchone()
+    if row is None:
+        raise ValueError(f"No body found with body_id={body_id}")
+    a_km, b_km = row
+    # pyproj expects metres
+    return Geod(a=float(a_km) * 1000, b=float(b_km) * 1000)
+
+
+def geodesic_length_km(lon, lat, geod):
+    """Compute the total geodesic length of a ground track in kilometres.
+
+    Sums the ellipsoidal geodesic distances between consecutive (lon, lat)
+    pairs using a pyproj Geod object. This accounts for the body's flattening
+    and is more accurate than a spherical haversine approximation.
+
+    Args:
+        lon (np.ndarray): Longitudes in degrees.
+        lat (np.ndarray): Latitudes in degrees.
+        geod (pyproj.Geod): A Geod object for the target body's ellipsoid,
+            as returned by :func:`get_body_radii`.
+
+    Returns:
+        float: Total ground track length in kilometres.
+    """
+    _, _, distances_m = geod.inv(lon[:-1], lat[:-1], lon[1:], lat[1:])
+    return float(np.sum(distances_m) / 1000.0)
+
+
+def process_file(sci_file, cursor, spice, inst_id, body_id, geod):
     """Process a single LRS science file and insert one observation row.
 
     Reads an LRS waveform science file, computes sub-spacecraft ground track
     geometry using SPICE via GRaSP, constructs a WKT LineString from the
-    resulting longitude/latitude pairs, and executes a parameterised INSERT
-    into the observations table.
+    resulting longitude/latitude pairs, computes duration in seconds and ground
+    track length in kilometres via pyproj geodesic calculation, and executes a
+    parameterised INSERT into the observations table.
 
     Args:
         sci_file (Path): Path to the LRS .tbl science file to process.
@@ -222,6 +270,8 @@ def process_file(sci_file, cursor, spice, inst_id, body_id):
             :func:`setup_spice`.
         inst_id (int): instrument_id for LRS in the PORPASS database.
         body_id (int): body_id for the Moon in the PORPASS database.
+        geod (pyproj.Geod): Geod object for the target body's ellipsoid, as
+            returned by :func:`get_body_radii`.
 
     Returns:
         bool: True if the INSERT was executed successfully.
@@ -256,20 +306,21 @@ def process_file(sci_file, cursor, spice, inst_id, body_id):
     coords = [(lo, la) for lo, la in zip(lon, lat)]
     line   = LineString(coords)
 
-    native_id = sci_file.stem  # basename without extension
+    start_time = pd.Timestamp(et[0])
+    stop_time  = pd.Timestamp(et[-1])
+    duration   = (stop_time - start_time).total_seconds()
+    length_km  = geodesic_length_km(lon, lat, geod)
+    native_id  = sci_file.stem  # basename without extension
 
     cursor.execute(INSERT_QRY, (
         inst_id,
         body_id,
         native_id,
-        pd.Timestamp(et[0]),
-        pd.Timestamp(et[-1]),
-        float(lat[0]),
-        float(lon[0]),
-        float(lat[-1]),
-        float(lon[-1]),
+        start_time,
+        stop_time,
+        duration,
+        length_km,
         line.wkt,
-        None,  # science_file_id — deferred until files table is implemented
     ))
     return True
 
@@ -326,6 +377,10 @@ def load_lrs(dry_run=False, limit=None, log_file=None):
     cnx    = get_connection(ENV_PATH)
     cursor = cnx.cursor()
 
+    # Build geodesic object from body radii stored in the bodies table
+    logging.info("Loading body radii from database...")
+    geod = get_body_radii(cursor, BODY_ID)
+
     # Find date directories
     date_dirs = sorted(LRS_ARCHIVE.glob('200?????'))
     if limit:
@@ -344,7 +399,7 @@ def load_lrs(dry_run=False, limit=None, log_file=None):
         for sci_file in sci_files:
             n_total += 1
             try:
-                result = process_file(sci_file, cursor, spice, INST_ID, BODY_ID)
+                result = process_file(sci_file, cursor, spice, INST_ID, BODY_ID, geod)
                 if result:
                     n_success += 1
                     logging.info(f"  OK        {sci_file.name}")
