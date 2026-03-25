@@ -22,11 +22,11 @@ import logging
 import sys
 from pathlib import Path
 
-OLD = "PATH_VALUES     = ( './data' )"
-NEW = "PATH_VALUES     = ( '/Volumes/data/NAIF/pds/mro-m-spice-6-v1.0/mrosp_1000/data')"
+OLD = "PATH_VALUES     = ( './DATA' )"
+NEW = "PATH_VALUES     = ( '/Volumes/data/NAIF/pds/mex-e_m-spice-6-v2.0/mexsp_2000/DATA')"
 
 # Meta-kernel files can carry several extensions
-MK_SUFFIXES = {".tm", ".mk", ".tf"}
+MK_SUFFIXES = {".tm", ".mk", ".tf", ".TM"}
 
 
 # ── Logging ───────────────────────────────────────────────────────────────────

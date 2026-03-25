@@ -1,25 +1,23 @@
 #!/usr/bin/env python3
-"""Import SHARAD EDR observations into the PORPASS database.
+"""Import MARSIS EDR observations into the PORPASS database.
 
-This script reads SHARAD auxiliary files from the MRO PDS EDR archive,
+This script reads MARSIS auxiliary files from the Mars Express PDS EDR archive,
 downloading them from the PDS Geosciences Node if not already cached locally,
 computes sub-spacecraft ground track geometry using SPICE kernels via GRaSP,
 decimates the ground track to 1-second intervals to control geometry size, and
 inserts one observation row per auxiliary file into the PORPASS observations
 table.
 
-SHARAD EDRs provide ephemeris time (ET) directly, so no UTC conversion is
-performed. MRO SPICE metakernels are year-based; the correct metakernel is
-selected per observation from the START_TIME and STOP_TIME fields of the EDR
-index file. If an observation spans a year boundary, both metakernels are
-furnished. Previously furnished metakernels are unloaded before loading new
-ones to avoid exceeding SPICE's kernel pool limits.
+MARSIS EDRs provide ephemeris time (ET) directly, so no UTC conversion is
+performed. Unlike MRO/SHARAD, Mars Express uses a single comprehensive
+metakernel (MEX_V15.TM) covering the full mission, so no per-observation
+kernel management is required.
 
 Progress is committed to the database every --commit-interval successful
 inserts (default: 100) to preserve work in the event of a crash or stall.
 
 Usage:
-    python load_sharad_edr.py [--dry-run] [--limit N] [--log-file PATH]
+    python load_marsis_edr.py [--dry-run] [--limit N] [--log-file PATH]
                               [--commit-interval N]
 
 Options:
@@ -35,15 +33,15 @@ Options:
 Examples:
     Dry run — validates without writing to the database::
 
-        python load_sharad_edr.py --dry-run
+        python load_marsis_edr.py --dry-run
 
     Import first 10 observations only::
 
-        python load_sharad_edr.py --limit 10
+        python load_marsis_edr.py --limit 10
 
     Full import with log file::
 
-        python load_sharad_edr.py --log-file /tmp/sharad_edr_import.log
+        python load_marsis_edr.py --log-file /tmp/marsis_edr_import.log
 
 """
 
@@ -72,35 +70,21 @@ import grasp
 # ── Configuration ─────────────────────────────────────────────────────────────
 
 ENV_PATH  = Path(__file__).resolve().parents[2] / '.env'
-MK_PATH   = Path("/Volumes/data/NAIF/pds/mro-m-spice-6-v1.0/mrosp_1000/extras/mk/")
-AUX_DIR   = Path("/Volumes/data/MRO/sharad/pds/edr/aux_files/")
-IDX_FILE  = Path("/Volumes/data/MRO/sharad/pds/edr/cumindex.tab")
-URL_MAIN  = 'https://pds-geosciences.wustl.edu/mro/mro-m-sharad-3-edr-v1/'
-INST_ID   = 2   # SHARAD instrument_id in porpass_dev
+MK_FILE   = Path("/Volumes/data/NAIF/pds/mex-e_m-spice-6-v2.0/mexsp_2000/EXTRAS/MK/MEX_V15.TM")
+AUX_DIR   = Path("/Volumes/data/MEx/marsis/pds/edr/aux_files/")
+IDX_FILE  = Path("/Volumes/data/MEx/marsis/pds/edr/index_files/cumindex_trk.tab")
+URL_MAIN  = 'https://pds-geosciences.wustl.edu/mex/'
+INST_ID   = 3   # MARSIS instrument_id in porpass_dev
 BODY_ID   = 1   # Mars body_id in porpass_dev
 METHOD    = "NEAR POINT/ELLIPSOID"
 
 EDR_NAMES = [
-    'VOLUME_ID',
-    'RELEASE_ID',
     'FILE_SPECIFICATION_NAME',
     'PRODUCT_ID',
     'PRODUCT_CREATION_TIME',
-    'PRODUCT_VERSION_ID',
-    'PRODUCT_VERSION_TYPE',
-    'PRODUCT_TYPE',
-    'MISSION_PHASE_NAME',
-    'ORBIT_NUMBER',
-    'START_TIME',
-    'STOP_TIME',
-    'SPACECRAFT_CLOCK_START_COUNT',
-    'SPACECRAFT_CLOCK_STOP_COUNT',
-    'MRO:START_SUB_SPACECRAFT_LATITUDE',
-    'MRO:STOP_SUB_SPACECRAFT_LATITUDE',
-    'MRO:START_SUB_SPACECRAFT_LONGITUDE',
-    'MRO:STOP_SUB_SPACECRAFT_LONGITUDE',
-    'INSTRUMENT_MODE_ID',
-    'DATA_QUALITY_ID',
+    'DATA_SET_ID',
+    'RELEASE_ID',
+    'REVISION_ID'
 ]
 
 INSERT_QRY = '''INSERT INTO observations
@@ -108,10 +92,10 @@ INSERT_QRY = '''INSERT INTO observations
      duration, length_km, geometry)
     VALUES (%s, %s, %s, %s, %s, %s, %s, ST_GeomFromText(%s, 0))'''
 
-INSERT_CHILD_QRY = '''INSERT INTO sharad_observations
-    (observation_id, mode_id, observation_type, orbit_number,
-     max_roll, start_sza, stop_sza, mean_sza, l_s)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)'''
+INSERT_CHILD_QRY = '''INSERT INTO marsis_observations
+    (observation_id, mode_id, state_id, form_id, orbit_number,
+     l_s, start_altitude, stop_altitude, start_sza, stop_sza, mean_sza)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)'''
 
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -191,6 +175,38 @@ def setup_logging(log_file=None):
     # Redirect stderr so that C-level / SpiceyPy / GRaSP prints are captured.
     sys.stderr = _TeeStream(sys.__stderr__, root, level=logging.WARNING)
 
+# ── SPICE ─────────────────────────────────────────────────────────────────────
+
+def setup_spice(mk_file):
+    """Furnish SPICE kernels and return Mars Express mission parameters.
+
+    Loads the MEX comprehensive metakernel via GRaSP and retrieves the
+    mission-specific SPICE parameters needed for state vector and geometry
+    computations. Unlike MRO, Mars Express uses a single metakernel covering
+    the full mission so this function is called once at startup.
+
+    Args:
+        mk_file (Path): Absolute path to the MEX SPICE metakernel (.TM) file.
+
+    Returns:
+        dict: A dictionary containing the following keys:
+
+            - ``obsrvr_str`` (str): SPICE observer string for Mars Express.
+            - ``fix_ref_str`` (str): Body-fixed reference frame string.
+            - ``ab_corr`` (str): Aberration correction flag (e.g. ``'LT+S'``).
+            - ``target_str`` (str): SPICE target body string (e.g. ``'MARS'``).
+            - ``utc`` (bool): Whether observation times are in UTC (always False).
+    """
+    grasp.furnish(str(mk_file))
+    params = grasp.grab_spice_params('MEX')
+    return {
+        'obsrvr_str':  params['OBSRVRSTR'],
+        'fix_ref_str': params['FIXREFSTR'],
+        'ab_corr':     params['ABCORR'],
+        'target_str':  params['TARGETSTR'],
+        'utc':         False,
+    }
+
 
 # ── Database ──────────────────────────────────────────────────────────────────
 
@@ -246,48 +262,6 @@ def get_body_radii(cursor, body_id):
     return Geod(a=float(a_km) * 1000, b=float(b_km) * 1000)
 
 
-# ── SPICE ─────────────────────────────────────────────────────────────────────
-
-def furnish_metakernels(start_year, stop_year, prev_mk_files):
-    """Select, unload, and furnish the correct MRO SPICE metakernel(s).
-
-    MRO metakernels are year-based. This function determines which metakernel
-    file(s) are required for the observation, unloads any previously furnished
-    metakernels if the year has changed, and furnishes the new ones.
-
-    If an observation spans a year boundary both the start-year and stop-year
-    metakernels are furnished.
-
-    Args:
-        start_year (int): Four-digit calendar year of the observation start,
-            derived from the START_TIME field of the EDR index.
-        stop_year (int): Four-digit calendar year of the observation stop,
-            derived from the STOP_TIME field of the EDR index.
-        prev_mk_files (list of Path): Metakernel files furnished for the
-            previous observation. These are unloaded if the year has changed.
-
-    Returns:
-        list of Path: The metakernel file(s) furnished for this observation.
-            Pass this return value as ``prev_mk_files`` for the next call.
-
-    Raises:
-        IndexError: If no metakernel matching the required year is found
-            in MK_PATH.
-    """
-    mk_files = [sorted(MK_PATH.glob(f"*{start_year}*.tm"))[-1]]
-    if stop_year != start_year:
-        mk_files.append(sorted(MK_PATH.glob(f"*{stop_year}*.tm"))[-1])
-
-    if mk_files != prev_mk_files:
-        for mk in prev_mk_files:
-            unload(str(mk))
-        for mk in mk_files:
-            grasp.furnish(str(mk))
-        logging.debug("Furnished metakernel(s): %s", [mk.name for mk in mk_files])
-
-    return mk_files
-
-
 # ── Geometry helpers ──────────────────────────────────────────────────────────
 
 def decimate_et(et):
@@ -332,9 +306,9 @@ def geodesic_length_km(lon, lat, geod):
 # ── Import ────────────────────────────────────────────────────────────────────
 
 def fetch_aux_file(row):
-    """Resolve the PDS URL for a SHARAD auxiliary file and download if needed.
+    """Resolve the PDS URL for a MARSIS auxiliary file and download if needed.
 
-    Constructs the URL from the index row's VOLUME_ID and
+    Constructs the URL from the index row's DATA_SET_ID and
     FILE_SPECIFICATION_NAME, derives the local cache path, and downloads the
     file if it is not already present locally.
 
@@ -347,11 +321,40 @@ def fetch_aux_file(row):
 
     Raises:
         URLError: If the file cannot be downloaded from the PDS server.
+        ValueError: If the DATA_SET_ID in the index row is not recognised.
     """
+    if row.DATA_SET_ID.strip() == 'MEX-M-MARSIS-2-EDR-V2.0':
+        data_set_id = 'MEX-M-MARSIS-2-EDR-V2'
+        archive = "1001"
+    elif row.DATA_SET_ID.strip() == 'MEX-M-MARSIS-2-EDR-EXT1-V2.0':
+        data_set_id = 'MEX-M-MARSIS-2-EDR-EXT1-V2'
+        archive = "1002"
+    elif row.DATA_SET_ID.strip() == 'MEX-M-MARSIS-2-EDR-EXT2-V1.0':
+        data_set_id = 'MEX-M-MARSIS-2-EDR-EXT2-V1'
+        archive = "1003"
+    elif row.DATA_SET_ID.strip() == 'MEX-M-MARSIS-2-EDR-EXT3-V1.0':
+        data_set_id = 'MEX-M-MARSIS-2-EDR-EXT3-V1'
+        archive = "1004"
+    elif row.DATA_SET_ID.strip() == 'MEX-M-MARSIS-2-EDR-EXT4-V1.0':
+        data_set_id = 'MEX-M-MARSIS-2-EDR-EXT4-V1'
+        archive = "1005"
+    elif row.DATA_SET_ID.strip() == 'MEX-M-MARSIS-2-EDR-EXT5-V1.0':
+        data_set_id = 'MEX-M-MARSIS-2-EDR-EXT5-V1'
+        archive = "1006"
+    elif row.DATA_SET_ID.strip() == 'MEX-M-MARSIS-2-EDR-EXT6-V1.0':
+        data_set_id = 'MEX-M-MARSIS-2-EDR-EXT6-V1'
+        archive = "1007"
+    elif row.DATA_SET_ID.strip() == 'MEX-M-MARSIS-2-EDR-EXT7-V1.0':
+        data_set_id = 'MEX-M-MARSIS-2-EDR-EXT7-V1'
+        archive = "1008"
+    else:
+        logging.warning("Unrecognised DATA_SET_ID: %s", row.DATA_SET_ID.strip())
+        raise ValueError(f"Unrecognised DATA_SET_ID: {row.DATA_SET_ID.strip()}")
+    arch = f"mexme_{archive}"
     url  = URL_MAIN
-    url += row.VOLUME_ID.strip()
+    url += data_set_id + '/' + arch
     url += '/' + row.FILE_SPECIFICATION_NAME.strip()
-    url  = url[:-4] + "_A.DAT"
+    url  = url[:-4] + "_G.DAT"
 
     local_path = AUX_DIR / os.path.basename(url).lower()
 
@@ -365,18 +368,19 @@ def fetch_aux_file(row):
 def process_row(row, cursor, spice, geod):
     """Process one EDR index row and insert one observation into the database.
 
-    Downloads the SHARAD auxiliary file if not already cached, computes
-    sub-spacecraft ground track geometry via GRaSP, decimates to 1-second
-    intervals, and executes a parameterised INSERT into the observations table.
-    Metakernel furnishing is handled by the caller before this function is
-    invoked.
+    Downloads the MARSIS auxiliary file if not already cached, determines the
+    target body from the filename designator (m=Mars, p=Phobos, t=transit),
+    skips transit observations, computes sub-spacecraft ground track geometry
+    via GRaSP, decimates to 1-second intervals, and executes a parameterised
+    INSERT into the observations table. Metakernel furnishing is handled by
+    the caller before this function is invoked.
 
     Args:
         row (pandas.core.frame.pandas): A named tuple row from the EDR index
             DataFrame, as produced by ``df.itertuples()``.
         cursor (pymysql.cursors.Cursor): An open database cursor.
         spice (dict): MRO SPICE parameter dictionary from
-            ``grasp.grab_spice_params('MRO')``.
+            ``grasp.grab_spice_params('MEX')``.
         geod (pyproj.Geod): Geod object for Mars's ellipsoid, as returned by
             :func:`get_body_radii`.
 
@@ -394,21 +398,31 @@ def process_row(row, cursor, spice, geod):
     # duplicates without paying the cost of a full file read.
     bn        = local_path.name
     prts      = bn.split('_')
-    native_id = '_'.join(prts[0:4])
+    native_id = '_'.join(prts[0:6])
+    target    = prts[5]   # single character: m=Mars, p=Phobos, t=transit
+
+    if target == 't':
+        logging.info("SKIP %s: transit observation", local_path.name)
+        return False
+    elif target == 'm':
+        body_id = 1   # Mars
+    elif target == 'p':
+        body_id = 4   # Phobos
+    else:
+        raise ValueError(f"Unrecognised target designator '{target}' in {local_path.name}")
 
     cursor.execute(
         '''SELECT o.observation_id
            FROM observations o
-           LEFT JOIN sharad_observations so ON so.observation_id = o.observation_id
+           LEFT JOIN marsis_observations mo ON mo.observation_id = o.observation_id
            WHERE o.instrument_id = %s AND o.native_id = %s''',
         (INST_ID, native_id),
     )
     existing = cursor.fetchone()
     if existing is not None:
         obs_id = existing[0]
-        # Check if sharad_observations row is missing (self-healing re-run)
         cursor.execute(
-            'SELECT 1 FROM sharad_observations WHERE observation_id = %s',
+            'SELECT 1 FROM marsis_observations WHERE observation_id = %s',
             (obs_id,)
         )
         if cursor.fetchone() is not None:
@@ -419,8 +433,7 @@ def process_row(row, cursor, spice, geod):
         insert_base = True
 
     aux  = grasp.read(local_path)
-    mask = aux['CORRUPTED_DATA_FLAG'] == 0
-    et   = aux['EPHEMERIS_TIME'][mask]
+    et   = aux['GEOMETRY_EPHEMERIS_TIME']
 
     if len(et) < 2:
         logging.warning(
@@ -429,19 +442,18 @@ def process_row(row, cursor, spice, geod):
         )
         return False
 
-    start_time = aux['GEOMETRY_EPOCH'][mask][0]
-    stop_time  = aux['GEOMETRY_EPOCH'][mask][-1]
+    start_time = aux['GEOMETRY_EPOCH'][0]
+    stop_time  = aux['GEOMETRY_EPOCH'][-1]
 
     vctrs = grasp.compute_state_vectors(
         et,
-        spice['OBSRVRSTR'],
-        spice['TARGETSTR'],
-        spice['FIXREFSTR'],
-        ab_corr=spice['ABCORR'],
+        spice['obsrvr_str'],
+        spice['target_str'],
+        spice['fix_ref_str'],
+        ab_corr=spice['ab_corr'],
         intercept_method_str=METHOD,
         utc=False,
     )
-
     geom = grasp.compute_geometry(vctrs.r_t, vctrs.r_s, vctrs.r_st)
 
     # Decimate to ~1-second intervals before constructing the LineString
@@ -455,31 +467,43 @@ def process_row(row, cursor, spice, geod):
     duration  = float((et[-1] - et[0]))
     length_km = geodesic_length_km(lon, lat, geod)
 
-    # SHARAD child table fields
-    mode_raw  = prts[3].upper()
-    mode_name = mode_raw[0:2] + mode_raw[2:].zfill(2)   # e.g. SS7 -> SS07
+    # MARSIS child table fields
+    mode_name    = prts[2].upper()   # e.g. ss2 -> SS2
+    state_name   = prts[3].upper()   # e.g. trk -> TRK
+    form_name    = prts[4].upper()   # e.g. cmp -> CMP
     orbit_number = int(prts[1])
-    max_roll  = float(np.max(aux['SC_ROLL_ANGLE'][mask]))
-    sza       = aux['SOLAR_ZENITH_ANGLE'][mask]
-    start_sza = float(sza[0])
-    stop_sza  = float(sza[-1])
-    mean_sza  = float(np.mean(sza))
-    l_s       = float(np.mean(aux['SOLAR_LONGITUDE'][mask]))
+    l_s          = float(np.mean(aux['MARS_SOLAR_LONGITUDE']))
+    altitude     = aux['SPACECRAFT_ALTITUDE']
+    sza          = aux['SOLAR_ZENITH_ANGLE']
+    start_altitude = float(altitude[0])
+    stop_altitude  = float(altitude[-1])
+    start_sza      = float(sza[0])
+    stop_sza       = float(sza[-1])
+    mean_sza       = float(np.mean(sza))
 
-    # Look up mode_id from sharad_modes
-    cursor.execute(
-        'SELECT mode_id FROM sharad_modes WHERE mode_name = %s',
-        (mode_name,)
-    )
+    # Look up mode_id, state_id, form_id from lookup tables
+    cursor.execute('SELECT mode_id FROM marsis_modes WHERE mode_name = %s', (mode_name,))
     mode_row = cursor.fetchone()
     if mode_row is None:
-        raise ValueError(f"Unrecognised SHARAD mode '{mode_name}' in {local_path.name}")
+        raise ValueError(f"Unrecognised MARSIS mode '{mode_name}' in {local_path.name}")
     mode_id = mode_row[0]
+
+    cursor.execute('SELECT state_id FROM marsis_states WHERE state_name = %s', (state_name,))
+    state_row = cursor.fetchone()
+    if state_row is None:
+        raise ValueError(f"Unrecognised MARSIS state '{state_name}' in {local_path.name}")
+    state_id = state_row[0]
+
+    cursor.execute('SELECT form_id FROM marsis_forms WHERE form_name = %s', (form_name,))
+    form_row = cursor.fetchone()
+    if form_row is None:
+        raise ValueError(f"Unrecognised MARSIS form '{form_name}' in {local_path.name}")
+    form_id = form_row[0]
 
     if insert_base:
         cursor.execute(INSERT_QRY, (
             INST_ID,
-            BODY_ID,
+            body_id,
             native_id,
             pd.Timestamp(start_time),
             pd.Timestamp(stop_time),
@@ -492,20 +516,22 @@ def process_row(row, cursor, spice, geod):
     cursor.execute(INSERT_CHILD_QRY, (
         obs_id,
         mode_id,
-        'EDR',
+        state_id,
+        form_id,
         orbit_number,
-        max_roll,
+        l_s,
+        start_altitude,
+        stop_altitude,
         start_sza,
         stop_sza,
         mean_sza,
-        l_s,
     ))
 
     return True
 
 
-def load_sharad_edr(dry_run=False, limit=None, log_file=None, commit_interval=100):
-    """Import SHARAD EDR observations from the PDS archive into the PORPASS database.
+def load_marsis_edr(dry_run=False, limit=None, log_file=None, commit_interval=100):
+    """Import MARSIS EDR observations from the PDS archive into the PORPASS database.
 
     Reads the cumulative EDR index file, iterates over each row, downloads the
     corresponding auxiliary file if needed, and calls :func:`process_row` for
@@ -538,7 +564,7 @@ def load_sharad_edr(dry_run=False, limit=None, log_file=None, commit_interval=10
 
     # Validate paths
     for path, label in [
-        (MK_PATH,   'SPICE metakernel directory'),
+        (MK_FILE,   'SPICE metakernel directory'),
         (AUX_DIR,   'Auxiliary file cache directory'),
         (IDX_FILE,  'EDR index file'),
         (ENV_PATH,  '.env file'),
@@ -549,15 +575,16 @@ def load_sharad_edr(dry_run=False, limit=None, log_file=None, commit_interval=10
 
     logging.info(f"Mode: {'DRY RUN' if dry_run else 'LIVE'}")
 
+    # Set up SPICE
+    logging.info("Furnishing SPICE kernels...")
+    spice = setup_spice(MK_FILE)
+
     # Load EDR index
     logging.info(f"Reading EDR index: {IDX_FILE}")
     df = pd.read_csv(IDX_FILE, names=EDR_NAMES, header=None, engine='python')
     if limit:
         df = df.iloc[:limit]
     logging.info(f"Processing {len(df)} index rows...")
-
-    # Grab MRO SPICE parameters (does not furnish kernels yet)
-    spice = grasp.grab_spice_params('MRO')
 
     # Connect to database
     logging.info("Connecting to database...")
@@ -574,26 +601,9 @@ def load_sharad_edr(dry_run=False, limit=None, log_file=None, commit_interval=10
     n_skipped   = 0
     n_failed    = 0
     n_total     = 0
-    prev_mk_files = []
-
     for row in df.itertuples():
         n_total += 1
         logging.debug("Row %d: %s", row.Index, row.FILE_SPECIFICATION_NAME.strip())
-
-        # Furnish the correct metakernel(s) based on the index timestamps.
-        # This is done outside the try/except so prev_mk_files is always
-        # updated even when process_row raises an exception or is skipped.
-        try:
-            start_year    = pd.to_datetime(row.START_TIME.strip(), format='%Y-%jT%H:%M:%S.%f').year
-            stop_year     = pd.to_datetime(row.STOP_TIME.strip(),  format='%Y-%jT%H:%M:%S.%f').year
-            prev_mk_files = furnish_metakernels(start_year, stop_year, prev_mk_files)
-        except Exception as e:
-            n_failed += 1
-            logging.warning(
-                "  FAIL (metakernel) %s: %s",
-                row.FILE_SPECIFICATION_NAME.strip(), e,
-            )
-            continue
 
         try:
             result = process_row(row, cursor, spice, geod)
@@ -645,7 +655,7 @@ def load_sharad_edr(dry_run=False, limit=None, log_file=None, commit_interval=10
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def parse_args():
-    """Parse command-line arguments for the SHARAD EDR import script.
+    """Parse command-line arguments for the MARSIS EDR import script.
 
     Returns:
         argparse.Namespace: Parsed arguments with the following attributes:
@@ -659,7 +669,7 @@ def parse_args():
               intermediate commits.
     """
     parser = argparse.ArgumentParser(
-        description="Import SHARAD EDR observations into the PORPASS database."
+        description="Import MARSIS EDR observations into the PORPASS database."
     )
     parser.add_argument(
         '--dry-run',
@@ -693,7 +703,7 @@ def parse_args():
 
 if __name__ == '__main__':
     args = parse_args()
-    load_sharad_edr(
+    load_marsis_edr(
         dry_run=args.dry_run,
         limit=args.limit,
         log_file=args.log_file,

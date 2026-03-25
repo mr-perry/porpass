@@ -1,24 +1,30 @@
 #!/usr/bin/env python3
-"""Import LRS radar sounder observations into the PORPASS database.
+"""Import LRS EDR observations into the PORPASS database.
 
 This script reads LRS waveform science files from the SELENE/Kaguya PDS archive,
-computes sub-spacecraft ground track geometry using SPICE kernels via GRaSP, and
-inserts one observation row per science file into the PORPASS observations table.
+computes sub-spacecraft ground track geometry and illumination angles using SPICE
+kernels via GRaSP, and inserts one observation row per science file into the
+PORPASS observations and lrs_observations tables. Both SW and SA mode files are
+handled automatically based on the filename.
+
+Progress is committed to the database every --commit-interval successful inserts
+(default: 100) to preserve work in the event of a crash or stall.
 
 Usage:
     python load_lrs_edr.py [--dry-run] [--limit N] [--log-file PATH]
+                           [--commit-interval N]
 
 Options:
-    --dry-run          Execute queries but roll back at the end (default: False)
-    --limit N          Process only the first N date directories (useful for testing)
-    --log-file PATH    Write log output to this file in addition to the console.
-                       The file receives DEBUG-level output (more verbose than the
-                       console, which shows INFO and above). Any text written to
-                       stderr by third-party libraries (SpiceyPy, GRaSP C extensions,
-                       etc.) is also captured in the log at WARNING level.
+    --dry-run              Execute queries but roll back at the end (default: False)
+    --limit N              Process only the first N date directories (useful for testing)
+    --commit-interval N    Commit every N successful inserts (default: 100)
+    --log-file PATH        Write log output to this file in addition to the console.
+                           The file receives DEBUG-level output (more verbose than
+                           the console). stderr from third-party libraries is also
+                           captured at WARNING level.
 
 Examples:
-    Dry run — validates without writing to the database::
+    Dry run::
 
         python load_lrs_edr.py --dry-run
 
@@ -28,7 +34,7 @@ Examples:
 
     Full import with log file::
 
-        python load_lrs_edr.py --log-file /tmp/lrs_import.log
+        python load_lrs_edr.py --log-file /tmp/lrs_edr_import.log
 
 """
 
@@ -56,7 +62,6 @@ import grasp
 ENV_PATH    = Path(__file__).resolve().parents[2] / '.env'
 MK_FILE     = Path("/Volumes/data/NAIF/pds/sln-l-spice-6-v1.0/slnsp_1000/extras/mk/SEL_V02.TM")
 LRS_ARCHIVE = Path("/Volumes/data/SELENE/lrs/darts/sln-l-lrs-2-sndr-waveform-high-v1.0/")
-LRS_MODE = "SW"
 DATA_GLOB   = os.path.join("data", "LRS_??_??_*.tbl")
 INST_ID     = 1   # LRS instrument_id in porpass_dev
 BODY_ID     = 3   # Moon body_id in porpass_dev
@@ -66,6 +71,11 @@ INSERT_QRY  = '''INSERT INTO observations
     (instrument_id, body_id, native_id, start_time, stop_time,
      duration, length_km, geometry)
     VALUES (%s, %s, %s, %s, %s, %s, %s, ST_GeomFromText(%s, 0))'''
+
+INSERT_CHILD_QRY = '''INSERT INTO lrs_observations
+    (observation_id, mode_id, observation_type, orbit_number,
+     mean_altitude, start_sza, stop_sza, mean_sza)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)'''
 
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -257,15 +267,16 @@ def process_file(sci_file, cursor, spice, inst_id, body_id, geod):
     """Process a single LRS science file and insert one observation row.
 
     Reads an LRS waveform science file, computes sub-spacecraft ground track
-    geometry using SPICE via GRaSP, constructs a WKT LineString from the
-    resulting longitude/latitude pairs, computes duration in seconds and ground
-    track length in kilometres via pyproj geodesic calculation, and executes a
-    parameterised INSERT into the observations table.
+    geometry and illumination angles using SPICE via GRaSP, constructs a WKT
+    LineString from the resulting longitude/latitude pairs, computes duration,
+    geodesic ground track length, mean altitude, and solar zenith angles, and
+    executes parameterised INSERTs into the observations and lrs_observations
+    tables. The mode (SW or SA) is derived from the filename.
 
     Args:
         sci_file (Path): Path to the LRS .tbl science file to process.
         cursor (pymysql.cursors.Cursor): An open database cursor on which to
-            execute the INSERT statement.
+            execute the INSERT statements.
         spice (dict): SPICE parameter dictionary as returned by
             :func:`setup_spice`.
         inst_id (int): instrument_id for LRS in the PORPASS database.
@@ -274,12 +285,36 @@ def process_file(sci_file, cursor, spice, inst_id, body_id, geod):
             returned by :func:`get_body_radii`.
 
     Returns:
-        bool: True if the INSERT was executed successfully.
+        bool: True if the INSERTs were executed successfully, False if the
+            observation was skipped.
 
     Raises:
         Exception: Any exception raised by GRaSP or PyMySQL is propagated to
             the caller, which logs it and continues to the next file.
     """
+    native_id = sci_file.stem  # basename without extension
+
+    # Check for duplicates before reading the file
+    cursor.execute(
+        '''SELECT o.observation_id
+           FROM observations o
+           LEFT JOIN lrs_observations lo ON lo.observation_id = o.observation_id
+           WHERE o.instrument_id = %s AND o.native_id = %s''',
+        (inst_id, native_id),
+    )
+    existing = cursor.fetchone()
+    if existing is not None:
+        obs_id = existing[0]
+        cursor.execute(
+            'SELECT 1 FROM lrs_observations WHERE observation_id = %s',
+            (obs_id,)
+        )
+        if cursor.fetchone() is not None:
+            raise sql.IntegrityError(f"Duplicate native_id: {native_id}")
+        insert_base = False
+    else:
+        insert_base = True
+
     sci = grasp.read(sci_file)
     et  = sci['OBSERVATION_TIME']
 
@@ -292,7 +327,7 @@ def process_file(sci_file, cursor, spice, inst_id, body_id, geod):
         intercept_method_str=METHOD,
         utc=spice['utc'],
     )
-    geom   = grasp.compute_geometry(vctrs.r_t, vctrs.r_s, vctrs.r_st)
+    geom = grasp.compute_geometry(vctrs.r_t, vctrs.r_s, vctrs.r_st)
 
     lon = np.atleast_1d(geom.longitude)
     lat = np.atleast_1d(geom.latitude)
@@ -303,29 +338,66 @@ def process_file(sci_file, cursor, spice, inst_id, body_id, geod):
         )
         return False
 
-    coords = [(lo, la) for lo, la in zip(lon, lat)]
-    line   = LineString(coords)
+    coords        = [(lo, la) for lo, la in zip(lon, lat)]
+    line          = LineString(coords)
+    start_time    = pd.Timestamp(et[0])
+    stop_time     = pd.Timestamp(et[-1])
+    duration      = (stop_time - start_time).total_seconds()
+    length_km     = geodesic_length_km(lon, lat, geod)
+    mean_altitude = float(np.mean(geom.altitude))
 
-    start_time = pd.Timestamp(et[0])
-    stop_time  = pd.Timestamp(et[-1])
-    duration   = (stop_time - start_time).total_seconds()
-    length_km  = geodesic_length_km(lon, lat, geod)
-    native_id  = sci_file.stem  # basename without extension
+    # Compute solar zenith angles via SPICE
+    illum     = grasp.compute_sza(
+        et,
+        spice['obsrvr_str'],
+        spice['target_str'],
+        vctrs.r_t,
+        ab_corr=spice['ab_corr'],
+        utc=spice['utc'],
+    )
+    sza       = np.degrees(illum.solar)
+    start_sza = float(sza[0])
+    stop_sza  = float(sza[-1])
+    mean_sza  = float(np.mean(sza))
 
-    cursor.execute(INSERT_QRY, (
-        inst_id,
-        body_id,
-        native_id,
-        start_time,
-        stop_time,
-        duration,
-        length_km,
-        line.wkt,
+    # Derive mode from filename: LRS_SW_... or LRS_SA_...
+    mode_name = sci_file.stem.split('_')[1]   # 'SW' or 'SA'
+    cursor.execute(
+        'SELECT mode_id FROM lrs_modes WHERE mode_name = %s',
+        (mode_name,)
+    )
+    mode_row = cursor.fetchone()
+    if mode_row is None:
+        raise ValueError(f"Unrecognised LRS mode '{mode_name}' in {sci_file.name}")
+    mode_id = mode_row[0]
+
+    if insert_base:
+        cursor.execute(INSERT_QRY, (
+            inst_id,
+            body_id,
+            native_id,
+            start_time,
+            stop_time,
+            duration,
+            length_km,
+            line.wkt,
+        ))
+        obs_id = cursor.lastrowid
+
+    cursor.execute(INSERT_CHILD_QRY, (
+        obs_id,
+        mode_id,
+        'EDR',
+        None,           # orbit_number -- NULL until derivation method is known
+        mean_altitude,
+        start_sza,
+        stop_sza,
+        mean_sza,
     ))
     return True
 
 
-def load_lrs_edr(dry_run=False, limit=None, log_file=None):
+def load_lrs_edr(dry_run=False, limit=None, log_file=None, commit_interval=100):
     """Import LRS observations from the PDS archive into the PORPASS database.
 
     Iterates over date subdirectories in the LRS archive, finds all .tbl
@@ -344,6 +416,8 @@ def load_lrs_edr(dry_run=False, limit=None, log_file=None):
         log_file (Path or None): If provided, log output is written to this
             file in addition to the console. Passed directly to
             :func:`setup_logging`. Defaults to None.
+        commit_interval (int): Number of successful inserts between intermediate
+            commits. Ignored in dry run mode. Defaults to 100.
 
     Returns:
         None
@@ -403,6 +477,9 @@ def load_lrs_edr(dry_run=False, limit=None, log_file=None):
                 if result:
                     n_success += 1
                     logging.info(f"  OK        {sci_file.name}")
+                    if not dry_run and n_success % commit_interval == 0:
+                        cnx.commit()
+                        logging.debug("Intermediate commit at %d successful inserts.", n_success)
                 else:
                     n_skipped += 1
             except sql.IntegrityError:
@@ -448,9 +525,11 @@ def parse_args():
               process, or None to process all.
             - ``log_file`` (Path or None): Path to a log file, or None if not
               specified.
+            - ``commit_interval`` (int): Number of successful inserts between
+              intermediate commits.
     """
     parser = argparse.ArgumentParser(
-        description="Import LRS observations into the PORPASS database."
+        description="Import LRS EDR observations into the PORPASS database."
     )
     parser.add_argument(
         '--dry-run',
@@ -472,9 +551,21 @@ def parse_args():
         metavar='PATH',
         help='Path to a log file. If omitted, output goes to the console only.'
     )
+    parser.add_argument(
+        '--commit-interval',
+        type=int,
+        default=100,
+        metavar='N',
+        help='Commit to the database every N successful inserts (default: 100). Ignored in dry run mode.'
+    )
     return parser.parse_args()
 
 
 if __name__ == '__main__':
     args = parse_args()
-    load_lrs_edr(dry_run=args.dry_run, limit=args.limit, log_file=args.log_file)
+    load_lrs_edr(
+        dry_run=args.dry_run,
+        limit=args.limit,
+        log_file=args.log_file,
+        commit_interval=args.commit_interval,
+    )
