@@ -10,10 +10,10 @@ table.
 
 SHARAD EDRs provide ephemeris time (ET) directly, so no UTC conversion is
 performed. MRO SPICE metakernels are year-based; the correct metakernel is
-selected per observation from the aux file's GEOMETRY_EPOCH field. If an
-observation spans a year boundary, both metakernels are furnished. Previously
-furnished metakernels are unloaded before loading new ones to avoid exceeding
-SPICE's kernel pool limits.
+selected per observation from the START_TIME and STOP_TIME fields of the EDR
+index file. If an observation spans a year boundary, both metakernels are
+furnished. Previously furnished metakernels are unloaded before loading new
+ones to avoid exceeding SPICE's kernel pool limits.
 
 Usage:
     python load_sharad_edr.py [--dry-run] [--limit N] [--log-file PATH]
@@ -238,19 +238,7 @@ def get_body_radii(cursor, body_id):
 
 # ── SPICE ─────────────────────────────────────────────────────────────────────
 
-def _datetime64_to_year(dt64):
-    """Extract the calendar year from a numpy datetime64 value.
-
-    Args:
-        dt64 (np.datetime64): A datetime64 value at any resolution.
-
-    Returns:
-        int: The four-digit calendar year.
-    """
-    return int(1970 + dt64.astype('M8[Y]').astype(int))
-
-
-def furnish_metakernels(start_time, stop_time, prev_mk_files):
+def furnish_metakernels(start_year, stop_year, prev_mk_files):
     """Select, unload, and furnish the correct MRO SPICE metakernel(s).
 
     MRO metakernels are year-based. This function determines which metakernel
@@ -261,8 +249,10 @@ def furnish_metakernels(start_time, stop_time, prev_mk_files):
     metakernels are furnished.
 
     Args:
-        start_time (np.datetime64): Observation start time.
-        stop_time (np.datetime64): Observation stop time.
+        start_year (int): Four-digit calendar year of the observation start,
+            derived from the START_TIME field of the EDR index.
+        stop_year (int): Four-digit calendar year of the observation stop,
+            derived from the STOP_TIME field of the EDR index.
         prev_mk_files (list of Path): Metakernel files furnished for the
             previous observation. These are unloaded if the year has changed.
 
@@ -271,12 +261,9 @@ def furnish_metakernels(start_time, stop_time, prev_mk_files):
             Pass this return value as ``prev_mk_files`` for the next call.
 
     Raises:
-        FileNotFoundError: If no metakernel matching the required year is found
+        IndexError: If no metakernel matching the required year is found
             in MK_PATH.
     """
-    start_year = _datetime64_to_year(start_time)
-    stop_year  = _datetime64_to_year(stop_time)
-
     mk_files = [sorted(MK_PATH.glob(f"*{start_year}*.tm"))[-1]]
     if stop_year != start_year:
         mk_files.append(sorted(MK_PATH.glob(f"*{stop_year}*.tm"))[-1])
@@ -365,13 +352,14 @@ def fetch_aux_file(row):
     return local_path
 
 
-def process_row(row, cursor, spice, geod, prev_mk_files):
+def process_row(row, cursor, spice, geod):
     """Process one EDR index row and insert one observation into the database.
 
-    Downloads the SHARAD auxiliary file if not already cached, furnishes the
-    appropriate MRO SPICE metakernel(s), computes sub-spacecraft ground track
-    geometry via GRaSP, decimates to 1-second intervals, and executes a
-    parameterised INSERT into the observations table.
+    Downloads the SHARAD auxiliary file if not already cached, computes
+    sub-spacecraft ground track geometry via GRaSP, decimates to 1-second
+    intervals, and executes a parameterised INSERT into the observations table.
+    Metakernel furnishing is handled by the caller before this function is
+    invoked.
 
     Args:
         row (pandas.core.frame.pandas): A named tuple row from the EDR index
@@ -381,14 +369,10 @@ def process_row(row, cursor, spice, geod, prev_mk_files):
             ``grasp.grab_spice_params('MRO')``.
         geod (pyproj.Geod): Geod object for Mars's ellipsoid, as returned by
             :func:`get_body_radii`.
-        prev_mk_files (list of Path): Metakernel files furnished for the
-            previous observation, passed to :func:`furnish_metakernels`.
 
     Returns:
-        tuple: A two-element tuple ``(success, prev_mk_files)`` where
-            ``success`` is True if the INSERT was executed, False if the
-            observation was skipped, and ``prev_mk_files`` is the updated list
-            of currently furnished metakernel files.
+        bool: True if the INSERT was executed successfully, False if the
+            observation was skipped.
 
     Raises:
         Exception: Any exception raised during processing is propagated to the
@@ -396,20 +380,32 @@ def process_row(row, cursor, spice, geod, prev_mk_files):
     """
     local_path = fetch_aux_file(row)
 
-    aux = grasp.read(local_path)
-    et  = aux['EPHEMERIS_TIME']
+    # Derive native_id before reading the aux file so we can check for
+    # duplicates without paying the cost of a full file read.
+    bn        = local_path.name
+    prts      = bn.split('_')
+    native_id = '_'.join(prts[0:4])
+
+    cursor.execute(
+        'SELECT 1 FROM observations WHERE instrument_id = %s AND native_id = %s',
+        (INST_ID, native_id),
+    )
+    if cursor.fetchone() is not None:
+        raise sql.IntegrityError(f"Duplicate native_id: {native_id}")
+
+    aux  = grasp.read(local_path)
+    mask = aux['CORRUPTED_DATA_FLAG'] == 0
+    et   = aux['EPHEMERIS_TIME'][mask]
 
     if len(et) < 2:
         logging.warning(
-            "SKIP %s: only %d data record(s) — need ≥ 2 for a valid LineString",
+            "SKIP %s: only %d valid data record(s) — need ≥ 2 for a valid LineString",
             local_path.name, len(et),
         )
-        return False, prev_mk_files
+        return False
 
-    start_time = aux['GEOMETRY_EPOCH'][0]
-    stop_time  = aux['GEOMETRY_EPOCH'][-1]
-
-    prev_mk_files = furnish_metakernels(start_time, stop_time, prev_mk_files)
+    start_time = aux['GEOMETRY_EPOCH'][mask][0]
+    stop_time  = aux['GEOMETRY_EPOCH'][mask][-1]
 
     vctrs = grasp.compute_state_vectors(
         et,
@@ -433,12 +429,6 @@ def process_row(row, cursor, spice, geod, prev_mk_files):
     duration  = float((et[-1] - et[0]))
     length_km = geodesic_length_km(lon, lat, geod)
 
-    # Derive native_id from the first four underscore-separated parts of the
-    # auxiliary filename (e.g. s_000a2_001_ss19_700 → s_000a2_001_ss19)
-    bn        = local_path.name
-    prts      = bn.split('_')
-    native_id = '_'.join(prts[0:4])
-
     cursor.execute(INSERT_QRY, (
         INST_ID,
         BODY_ID,
@@ -450,7 +440,7 @@ def process_row(row, cursor, spice, geod, prev_mk_files):
         line.wkt,
     ))
 
-    return True, prev_mk_files
+    return True
 
 
 def load_sharad_edr(dry_run=False, limit=None, log_file=None):
@@ -526,10 +516,24 @@ def load_sharad_edr(dry_run=False, limit=None, log_file=None):
     for row in df.itertuples():
         n_total += 1
         logging.debug("Row %d: %s", row.Index, row.FILE_SPECIFICATION_NAME.strip())
+
+        # Furnish the correct metakernel(s) based on the index timestamps.
+        # This is done outside the try/except so prev_mk_files is always
+        # updated even when process_row raises an exception or is skipped.
         try:
-            result, prev_mk_files = process_row(
-                row, cursor, spice, geod, prev_mk_files
+            start_year    = pd.to_datetime(row.START_TIME.strip(), format='%Y-%jT%H:%M:%S.%f').year
+            stop_year     = pd.to_datetime(row.STOP_TIME.strip(),  format='%Y-%jT%H:%M:%S.%f').year
+            prev_mk_files = furnish_metakernels(start_year, stop_year, prev_mk_files)
+        except Exception as e:
+            n_failed += 1
+            logging.warning(
+                "  FAIL (metakernel) %s: %s",
+                row.FILE_SPECIFICATION_NAME.strip(), e,
             )
+            continue
+
+        try:
+            result = process_row(row, cursor, spice, geod)
             if result:
                 n_success += 1
                 logging.info(f"  OK        {row.PRODUCT_ID.strip()}")
