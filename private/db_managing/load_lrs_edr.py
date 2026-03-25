@@ -6,7 +6,7 @@ computes sub-spacecraft ground track geometry using SPICE kernels via GRaSP, and
 inserts one observation row per science file into the PORPASS observations table.
 
 Usage:
-    python load_lrs.py [--dry-run] [--limit N] [--log-file PATH]
+    python load_lrs_edr.py [--dry-run] [--limit N] [--log-file PATH]
 
 Options:
     --dry-run          Execute queries but roll back at the end (default: False)
@@ -20,15 +20,15 @@ Options:
 Examples:
     Dry run — validates without writing to the database::
 
-        python load_lrs.py --dry-run
+        python load_lrs_edr.py --dry-run
 
     Import first 5 date directories only::
 
-        python load_lrs.py --limit 5
+        python load_lrs_edr.py --limit 5
 
     Full import with log file::
 
-        python load_lrs.py --log-file /tmp/lrs_import.log
+        python load_lrs_edr.py --log-file /tmp/lrs_import.log
 
 """
 
@@ -325,7 +325,7 @@ def process_file(sci_file, cursor, spice, inst_id, body_id, geod):
     return True
 
 
-def load_lrs(dry_run=False, limit=None, log_file=None):
+def load_lrs_edr(dry_run=False, limit=None, log_file=None):
     """Import LRS observations from the PDS archive into the PORPASS database.
 
     Iterates over date subdirectories in the LRS archive, finds all .tbl
@@ -477,4 +477,4 @@ def parse_args():
 
 if __name__ == '__main__':
     args = parse_args()
-    load_lrs(dry_run=args.dry_run, limit=args.limit, log_file=args.log_file)
+    load_lrs_edr(dry_run=args.dry_run, limit=args.limit, log_file=args.log_file)
