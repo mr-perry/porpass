@@ -12,6 +12,14 @@ use Dotenv\Dotenv;
 
 $dotenv = Dotenv::createImmutable(__DIR__ . '/..');
 $dotenv->load();
+/**
+ * Apply debugging to page if $_ENV['APP_ENV'] === 'development'
+ */
+if ($_ENV['APP_ENV'] === 'development') {
+    ini_set('display_errors', 1);
+    ini_set('display_startup_errors', 1);
+    error_reporting(E_ALL);
+}
 
 /**
  * Returns a singleton PDO connection to the PORPASS database.
