@@ -35,7 +35,11 @@ function open_layout(string $title = 'PORPASS'): void {
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
     <div class="container-fluid">
 
-        <a class="navbar-brand fw-bold" href="/dashboard.php">PORPASS</a>
+        <?php if ($_ENV['APP_ENV'] === 'development') : ?>
+            <a class="navbar-brand fw-bold" href="/dashboard.php">PORPASS-DEV</a>
+        <?php else: ?>
+            <a class="navbar-brand fw-bold" href="/dashboard.php">PORPASS</a>
+        <?php endif ?>
 
         <button class="navbar-toggler"
                 type="button"

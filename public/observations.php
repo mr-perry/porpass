@@ -624,7 +624,7 @@ const allInstruments = {
         echo '},';
     }
     ?>
-};
+}
 
 const savedInstrument = <?= json_encode((int)($_POST['instrument_id'] ?? 0)) ?>;
 
