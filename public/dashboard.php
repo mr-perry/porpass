@@ -7,6 +7,9 @@
  * processing chart. Admin users additionally see pending approval counts,
  * total user stats, and system health indicators.
  */
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
 
 require_once __DIR__ . '/../src/auth.php';
 require_once __DIR__ . '/../src/db.php';
@@ -46,12 +49,12 @@ $total_observations = array_sum(array_column($obs_stats, 'obs_count'));
 // ── Recent observations (last 5) ──────────────────────────────────────────
 
 $recent_observations = $db->query(
-    'SELECT o.native_id, o.start_time, o.end_time,
+    'SELECT o.native_id, o.start_time, o.stop_time,
             i.instrument_abbr, b.body_name
      FROM observations o
      JOIN instruments i ON o.instrument_id = i.instrument_id
      JOIN bodies b      ON o.body_id       = b.body_id
-     ORDER BY o.created_at DESC
+     ORDER BY o.start_time DESC
      LIMIT 5'
 )->fetchAll();
 
