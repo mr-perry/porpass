@@ -61,11 +61,10 @@ open_layout('LRS — Documentation');
             <h4 class="mb-3">Overview</h4>
             <p>
                 The Lunar Radar Sounder (LRS) was a scientific instrument onboard
-                the SELENE spacecraft (also known as Kaguya), a JAXA lunar orbiter
+                the Selenological and Engineering Explorer (SELENE) spacecraft (also known as Kaguya), a JAXA lunar orbiter
                 launched on September 14, 2007. LRS began radar sounder operations
-                on October 29, 2007, following sequential deployment of its four
-                antenna elements in the final lunar orbit. The mission concluded with
-                a controlled spacecraft impact on June 10, 2009.
+                on October 29, 2007. The mission concluded with a controlled spacecraft
+                impact on June 10, 2009.
             </p>
             <p>
                 LRS is a frequency-modulated continuous-wave (FMCW) radar sounder
@@ -113,7 +112,9 @@ open_layout('LRS — Documentation');
                         </tbody>
                     </table>
                 </div>
+                <!--
                 <div class="col-md-6">
+                    
                     <h6 class="text-muted small text-uppercase">Antenna &amp; Passive Receivers</h6>
                     <table class="table table-sm table-bordered">
                         <tbody>
@@ -125,6 +126,7 @@ open_layout('LRS — Documentation');
                             <tr><th class="table-light">WFC-L Freq. Range</th><td>100 Hz – 100 kHz</td></tr>
                         </tbody>
                     </table>
+
                     <h6 class="text-muted small text-uppercase mt-3">Data Transmission</h6>
                     <table class="table table-sm table-bordered">
                         <tbody>
@@ -135,6 +137,7 @@ open_layout('LRS — Documentation');
                         </tbody>
                     </table>
                 </div>
+                -->
             </div>
         </section>
 
@@ -149,8 +152,7 @@ open_layout('LRS — Documentation');
                 200-µs pulse width, at a sweep rate of 10 kHz/µs. A synchronized swept
                 local signal is mixed with received echoes to convert the time delay of
                 each echo into a proportional intermediate frequency, which is then
-                analyzed by Fast Fourier Transform (FFT) — either onboard (SDR-W mode)
-                or on the ground after downlinking raw waveforms (Ono &amp; Oya, 2000).
+                analyzed by Fast Fourier Transform (FFT) — on the ground after downlinking raw waveforms (Ono &amp; Oya, 2000).
                 This range compression technique allows a long, high-power pulse to be
                 used while achieving the range resolution set by the 2-MHz bandwidth
                 rather than the pulse duration.
@@ -186,21 +188,20 @@ open_layout('LRS — Documentation');
                         <tr>
                             <td>SDR-W</td>
                             <td>20 Hz</td>
-                            <td>IF waveform (full)</td>
+                            <td>IF waveform</td>
                             <td>50 ms</td>
-                            <td>Primary sounder mode; enables SAR analysis</td>
+                            <td>Primary sounder mode</td>
                         </tr>
                         <tr>
                             <td>SDR-A</td>
                             <td>2.5 Hz</td>
-                            <td>IF waveform (partial)</td>
+                            <td>IF waveform</td>
                             <td>400 ms</td>
-                            <td>Low data-rate mode; fills coverage gaps</td>
+                            <td>Low data-rate mode</td>
                         </tr>
                     </tbody>
                 </table>
             </div>
-
             <h5 class="mt-4">Passive Receivers (NPW &amp; WFC)</h5>
             <p>
                 In addition to the active sounder, LRS includes two passive subsystems.

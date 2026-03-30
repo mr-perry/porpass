@@ -68,26 +68,26 @@ open_layout('MARSIS — Documentation');
                 Developed by an Italian–US team, MARSIS is the first spaceborne
                 sounding radar to operate at Mars and the first instrument of its
                 kind since the Apollo Lunar Sounder Experiment (ALSE) in 1972.
-                MARSIS began acquiring scientific data in June 2005 following
+                MARSIS began acquiring scientific data in July 2005 following
                 successful deployment of its 40-m antenna (Orosei et al., 2015).
             </p>
             <p>
                 MARSIS operates from a highly elliptical orbit, acquiring subsurface
                 sounding data at altitudes below 900 km and ionospheric sounding data
                 at altitudes up to 1200 km. The instrument transmits low-frequency,
-                wide-band radio pulses through a 40-m dipole antenna. A second 7-m
+                radio pulses through a 40-m dipole antenna. A second 7-m
                 monopole antenna provides a surface clutter cancellation channel.
                 The subsurface sounder operates over four frequency bands of 1 MHz
-                bandwidth each in the range 1.3–5.5 MHz, with the bands centered near
-                1.8, 3, 4, and 5 MHz most commonly used for subsurface sounding
+                bandwidth each in the range 1.3–5.5 MHz, with the bands centered at
+                3, 4, and 5 MHz most commonly used for subsurface sounding
                 (Jordan et al., 2009).
             </p>
             <p>
                 MARSIS data are complementary to SHARAD: operating at lower
-                frequencies, MARSIS achieves greater penetration depth — up to several
-                kilometers in ice-rich polar terrains — at the cost of coarser vertical
-                resolution. The nominal free-space range resolution is 150 m per 1-MHz
-                band, compared to SHARAD's 15 m over its 10-MHz bandwidth. MARSIS
+                frequencies with a narrower bandwidth, MARSIS achieves greater
+                penetration depth — up to several kilometers in ice-rich polar
+                terrains — at the cost of coarser vertical resolution. The nominal
+                free-space range resolution is 150 m, compared to SHARAD's 15 m. MARSIS
                 also successfully sounded Phobos during several close flybys of Mars
                 Express, becoming the first radar sounder to observe an asteroid-like
                 body (Orosei et al., 2015).
@@ -119,6 +119,7 @@ open_layout('MARSIS — Documentation');
                         </tbody>
                     </table>
                 </div>
+                <!--
                 <div class="col-md-6">
                     <h6 class="text-muted small text-uppercase">Ionospheric Sounder (AIS)</h6>
                     <table class="table table-sm table-bordered">
@@ -133,6 +134,7 @@ open_layout('MARSIS — Documentation');
                         </tbody>
                     </table>
                 </div>
+                -->
             </div>
         </section>
 
@@ -184,7 +186,7 @@ open_layout('MARSIS — Documentation');
                     </tbody>
                 </table>
             </div>
-
+            <!--
             <h5 class="mt-4">Active Ionospheric Sounding (AIS)</h5>
             <p>
                 When Mars Express is above approximately 900 km altitude, MARSIS
@@ -197,7 +199,7 @@ open_layout('MARSIS — Documentation');
                 frequency and delay time, from which electron density profiles can be
                 reconstructed by inversion of the ionospheric trace (Orosei et al., 2015).
             </p>
-
+            -->
             <h5 class="mt-4">Key Processing Challenges</h5>
             <p>
                 The primary processing challenge for MARSIS subsurface data is
