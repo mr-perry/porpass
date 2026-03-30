@@ -61,8 +61,13 @@ open_layout('SHARAD — Documentation');
             <h4 class="mb-3">Overview</h4>
             <p>
                 The Shallow Radar (SHARAD) is a subsurface sounding radar onboard
-                NASA's Mars Reconnaissance Orbiter (MRO). SHARAD began its primary
-                science phase in October 2006 and has been in continuous operation for
+                NASA's Mars Reconnaissance Orbiter (MRO). SHARAD was provided to MRO
+                by the <a href="https://www.asi.it/en/" target="_blank" rel="noopener noreferrer">
+                Agenzia Spaziale Italiana (ASI)</a> and is operated under contract to SHARAD Team
+                Leader Pierfrancesco Lombardo at the Sapienza - Università di Roma.
+            </p>
+            <p>
+                SHARAD began its primary science phase in October 2006 and has been in continuous operation for
                 nearly 20 years, acquiring data along more than 38,000 discrete orbit
                 segments covering approximately 62% of the Martian surface at its
                 nominal 3-km cross-track resolution. Coverage is greater than 90%
@@ -78,7 +83,7 @@ open_layout('SHARAD — Documentation');
             </p>
             <p>
                 SHARAD provides complementary data to MARSIS onboard Mars Express.
-                Operating at higher frequencies and narrower bandwidth than MARSIS,
+                Operating at higher frequencies and wider bandwidth than MARSIS,
                 SHARAD achieves finer vertical resolution at the cost of shallower
                 penetration depth.
             </p>
@@ -103,7 +108,7 @@ open_layout('SHARAD — Documentation');
                             <tr><th class="table-light">Pulse Width</th><td>85 µs</td></tr>
                             <tr><th class="table-light">PRF</th><td>700.28 Hz</td></tr>
                             <tr><th class="table-light">Peak TX Power</th><td>10 W</td></tr>
-                            <tr><th class="table-light">Range Resolution</th><td>15 m (free-space); ~10–20 m effective</td></tr>
+                            <tr><th class="table-light">Range Resolution</th><td>15 m (free-space)</td></tr>
                             <tr><th class="table-light">Along-track Res.</th><td>300–450 m</td></tr>
                             <tr><th class="table-light">Cross-track Res.</th><td>~3 km (Fresnel zone)</td></tr>
                             <tr><th class="table-light">Orbital Altitude</th><td>~300 km</td></tr>
@@ -122,37 +127,21 @@ open_layout('SHARAD — Documentation');
                 85-µs pulse width, with a pulse repetition frequency of 700.28 Hz. The
                 10-MHz bandwidth yields a nominal 15-m free-space range resolution.
                 The instrument uses a 10-m dipole antenna for both transmitting and
-                receiving. Upon reaching the surface from MRO's orbital altitude of
-                approximately 300 km, the Fresnel zone of the signal extends over a
-                roughly 3-km circular area, establishing the nominal lateral resolution.
+                receiving.
             </p>
             <p>
                 Data are processed into two-dimensional radargrams — profile images
                 showing returned radar power with delay time on the vertical axis and
-                along-track distance on the horizontal axis. Three processing pipelines
-                are available through the Colorado Shallow Radar Processing System
-                (CO-SHARPS): the Italian team processor (primary PDS archive), the
-                US JPL processor, and the US Smithsonian Institution (SI) processor.
-                Each applies synthetic-aperture processing, ionospheric correction, and
-                range compression but differs in aperture length, datum, and
-                ionospheric correction method.
+                along-track distance on the horizontal axis - using synthetic aperture
+                techniques. Advanced techniques including subband processing, incoherent summing,
+                superresolution, and full three-dimensional radar imaging have been developed
+                over the mission to extend data utility.
             </p>
             <p>
-                Effective subsurface resolution in processed radargrams is approximately
-                10–20 m rather than the nominal 15 m, due to frequency-domain windowing
-                applied to suppress sidelobe ringing. Advanced techniques including
-                subband processing, coherent summing, superresolution, and full
-                three-dimensional radar imaging have been developed over the mission
-                to extend data utility.
-            </p>
-            <p>
-                Because SHARAD's antenna was mounted in a non-optimal position on MRO's
-                zenith deck, the MRO Project executes roll maneuvers during observations
-                to reduce spacecraft body interference with the radar signal. Moderate
-                rolls of up to 28° provide an average 6-dB signal-to-noise improvement.
-                A 120° roll test conducted in May 2023 demonstrated a further 9-dB
-                improvement, pointing toward a new high-value observing mode for future
-                operations.
+                Because SHARAD's antenna was mounted on the zenith deck, the MRO Project
+                executes roll maneuvers during observations to reduce spacecraft body
+                interference with the radar signal. Moderate rolls of up to 28° provide an
+                average 6-dB signal-to-noise improvement.
             </p>
         </section>
 
@@ -163,10 +152,9 @@ open_layout('SHARAD — Documentation');
                 <li class="list-group-item px-0">
                     <strong>Polar stratigraphy</strong> — SHARAD has detected up to 48
                     reflecting interfaces within the Martian polar layered deposits,
-                    penetrating to depths of 2–3 km and revealing complex climate records
-                    in the late Amazonian period. Three-dimensional radar imaging of both
-                    polar regions has clarified internal stratigraphy and resolved
-                    off-nadir surface clutter.
+                    penetrating to depths of 1-2 km and revealing complex climate records.
+                    Three-dimensional radar imaging of both polar regions has clarified
+                    internal stratigraphy and resolved off-nadir surface clutter.
                 </li>
                 <li class="list-group-item px-0">
                     <strong>Carbon dioxide ice</strong> — Near-surface deposits of massive
@@ -178,7 +166,7 @@ open_layout('SHARAD — Documentation');
                     <strong>Mid-latitude glaciers</strong> — Strong basal reflections and
                     low dielectric loss confirm that lobate debris aprons are ice-rich,
                     debris-covered glaciers, with hundreds of meters of nearly pure ice
-                    beneath thin debris layers of 4–7 m.
+                    beneath thin debris layers.
                 </li>
                 <li class="list-group-item px-0">
                     <strong>Subsurface water ice mapping</strong> — SHARAD surface and
@@ -187,7 +175,7 @@ open_layout('SHARAD — Documentation');
                     the Martian mid-latitudes, informing future human landing site planning.
                 </li>
                 <li class="list-group-item px-0">
-                    <strong>Volcanic stratigraphy</strong> — Stacks of at least five lava
+                    <strong>Volcanic stratigraphy</strong> — Stacks of lava
                     flows have been mapped in Elysium Planitia and other Amazonian volcanic
                     provinces, constraining eruption sources and preexisting terrain
                     morphology.

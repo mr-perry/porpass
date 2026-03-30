@@ -7,9 +7,6 @@
  * processing chart. Admin users additionally see pending approval counts,
  * total user stats, and system health indicators.
  */
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
 
 require_once __DIR__ . '/../src/auth.php';
 require_once __DIR__ . '/../src/db.php';
