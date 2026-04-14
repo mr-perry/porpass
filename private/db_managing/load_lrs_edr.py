@@ -61,7 +61,7 @@ import grasp
 
 ENV_PATH    = Path(__file__).resolve().parents[2] / '.env'
 MK_FILE     = Path("/Volumes/data/NAIF/pds/sln-l-spice-6-v1.0/slnsp_1000/extras/mk/SEL_V02.TM")
-LRS_ARCHIVE = Path("/Volumes/data/SELENE/lrs/darts/sln-l-lrs-2-sndr-waveform-high-v1.0/")
+LRS_ARCHIVE = Path("/Volumes/data/SELENE/lrs/darts/sln-l-lrs-2-sndr-waveform-low-v1.0")
 DATA_GLOB   = os.path.join("data", "LRS_??_??_*.tbl")
 INST_ID     = 1   # LRS instrument_id in porpass_dev
 BODY_ID     = 3   # Moon body_id in porpass_dev
@@ -263,15 +263,38 @@ def geodesic_length_km(lon, lat, geod):
     return float(np.sum(distances_m) / 1000.0)
 
 
+def decimate_utc(utc):
+    """Decimate a UTC timestamp array to approximately 1-second intervals.
+
+    Truncates each UTC string to whole seconds, selects the index of the first
+    sample within each unique second, and always preserves the first and last
+    samples to ensure the ground track endpoints are accurate.
+
+    Args:
+        utc (np.ndarray): Array of numpy datetime64 objects with sub-second
+            precision.
+
+    Returns:
+        np.ndarray: Integer indices into ``utc`` of the decimated samples.
+    """
+    truncated = utc.astype('datetime64[s]')   # truncate to second precision
+    _, idx    = np.unique(truncated, return_index=True)
+    idx       = np.sort(np.union1d(idx, [len(utc) - 1]))
+    return idx
+
+
 def process_file(sci_file, cursor, spice, inst_id, body_id, geod):
     """Process a single LRS science file and insert one observation row.
 
-    Reads an LRS waveform science file, computes sub-spacecraft ground track
-    geometry and illumination angles using SPICE via GRaSP, constructs a WKT
-    LineString from the resulting longitude/latitude pairs, computes duration,
-    geodesic ground track length, mean altitude, and solar zenith angles, and
-    executes parameterised INSERTs into the observations and lrs_observations
-    tables. The mode (SW or SA) is derived from the filename.
+    Reads an LRS waveform science file, decimates the observation time array
+    to 1-second UTC intervals (preserving first and last samples) to reduce
+    geometry density to a level appropriate for GIS display, computes
+    sub-spacecraft ground track geometry and
+    illumination angles using SPICE via GRaSP, constructs a WKT LineString
+    from the resulting longitude/latitude pairs, computes duration, geodesic
+    ground track length, mean altitude, and solar zenith angles, and executes
+    parameterised INSERTs into the observations and lrs_observations tables.
+    The mode (SW or SA) is derived from the filename.
 
     Args:
         sci_file (Path): Path to the LRS .tbl science file to process.
@@ -317,6 +340,17 @@ def process_file(sci_file, cursor, spice, inst_id, body_id, geod):
 
     sci = grasp.read(sci_file)
     et  = sci['OBSERVATION_TIME']
+
+    # Coerce to array in case the file has only a single record (scalar)
+    et = np.atleast_1d(et)
+    if len(et) < 2:
+        logging.warning(
+            "SKIP %s: only %d data record(s) — need >= 2 for a valid LineString",
+            sci_file.name, len(et),
+        )
+        return False
+
+    et = et[decimate_utc(et)]
 
     vctrs = grasp.compute_state_vectors(
         et,
