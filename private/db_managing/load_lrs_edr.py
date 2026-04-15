@@ -263,34 +263,14 @@ def geodesic_length_km(lon, lat, geod):
     return float(np.sum(distances_m) / 1000.0)
 
 
-def decimate_utc(utc):
-    """Decimate a UTC timestamp array to approximately 1-second intervals.
-
-    Truncates each UTC string to whole seconds, selects the index of the first
-    sample within each unique second, and always preserves the first and last
-    samples to ensure the ground track endpoints are accurate.
-
-    Args:
-        utc (np.ndarray): Array of numpy datetime64 objects with sub-second
-            precision.
-
-    Returns:
-        np.ndarray: Integer indices into ``utc`` of the decimated samples.
-    """
-    truncated = utc.astype('datetime64[s]')   # truncate to second precision
-    _, idx    = np.unique(truncated, return_index=True)
-    idx       = np.sort(np.union1d(idx, [len(utc) - 1]))
-    return idx
-
 
 def process_file(sci_file, cursor, spice, inst_id, body_id, geod):
     """Process a single LRS science file and insert one observation row.
 
-    Reads an LRS waveform science file, decimates the observation time array
-    to 1-second UTC intervals (preserving first and last samples), applies
-    Ramer-Douglas-Peucker simplification (tolerance=0.001 degrees) to reduce point
-    count while preserving track shape, converts longitudes from 0-360 to -180/180
-    convention, then computes sub-spacecraft ground track geometry and
+    Reads an LRS waveform science file, applies Ramer-Douglas-Peucker
+    simplification (tolerance=0.001 degrees) to the raw ground track coordinates
+    to reduce point count while preserving track shape, converts longitudes from
+    0-360 to -180/180 convention, then computes sub-spacecraft ground track geometry and
     illumination angles using SPICE via GRaSP, constructs a WKT LineString
     from the resulting longitude/latitude pairs, computes duration, geodesic
     ground track length, mean altitude, and solar zenith angles, and executes
@@ -350,8 +330,6 @@ def process_file(sci_file, cursor, spice, inst_id, body_id, geod):
             sci_file.name, len(et),
         )
         return False
-
-    et = et[decimate_utc(et)]
 
     vctrs = grasp.compute_state_vectors(
         et,
