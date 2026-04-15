@@ -1,3 +1,0 @@
-Use caffeinate -i on Mac to prevent hang ups while processing overnight
-
-caffeinate -i python load_sharad_edr.py --log-file /tmp/sharad_edr_import.log
