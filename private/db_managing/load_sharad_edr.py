@@ -4,8 +4,8 @@
 This script reads SHARAD auxiliary files from the MRO PDS EDR archive,
 downloading them from the PDS Geosciences Node if not already cached locally,
 computes sub-spacecraft ground track geometry using SPICE kernels via GRaSP,
-decimates the ground track to 1-second intervals, applies Ramer-Douglas-Peucker
-simplification (tolerance=0.001°) to reduce point count while preserving track shape,
+applies Ramer-Douglas-Peucker simplification (tolerance=0.001°) to the raw
+ground track coordinates to reduce point count while preserving track shape,
 converts longitudes from 0-360 to -180/180 convention, and
 inserts one observation row per auxiliary file into the PORPASS observations
 table.
@@ -292,24 +292,6 @@ def furnish_metakernels(start_year, stop_year, prev_mk_files):
 
 # ── Geometry helpers ──────────────────────────────────────────────────────────
 
-def decimate_et(et):
-    """Decimate an ET array to approximately 1-second intervals.
-
-    Selects one sample per elapsed second relative to the observation start,
-    always preserving the first and last samples to ensure the ground track
-    endpoints are accurate.
-
-    Args:
-        et (np.ndarray): Array of ephemeris times in seconds past J2000.
-
-    Returns:
-        np.ndarray: Integer indices into ``et`` of the decimated samples.
-    """
-    et_rel  = et - et[0]
-    _, idx  = np.unique(np.floor(et_rel).astype(int), return_index=True)
-    idx     = np.sort(np.union1d(idx, [len(et) - 1]))
-    return idx
-
 
 def geodesic_length_km(lon, lat, geod):
     """Compute the total geodesic length of a ground track in kilometres.
@@ -368,8 +350,9 @@ def process_row(row, cursor, spice, geod):
     """Process one EDR index row and insert one observation into the database.
 
     Downloads the SHARAD auxiliary file if not already cached, computes
-    sub-spacecraft ground track geometry via GRaSP, decimates to 1-second
-    intervals, and executes a parameterised INSERT into the observations table.
+    sub-spacecraft ground track geometry via GRaSP, applies Ramer-Douglas-Peucker
+    simplification (tolerance=0.001 degrees) to the raw ground track coordinates,
+    and executes a parameterised INSERT into the observations table.
     Metakernel furnishing is handled by the caller before this function is
     invoked.
 
@@ -446,11 +429,9 @@ def process_row(row, cursor, spice, geod):
 
     geom = grasp.compute_geometry(vctrs.r_t, vctrs.r_s, vctrs.r_st)
 
-    # Decimate to ~1-second intervals before constructing the LineString
-    idx = decimate_et(et)
-    lon = np.atleast_1d(geom.longitude)[idx]
+    lon = np.atleast_1d(geom.longitude)
     lon = np.where(lon > 180, lon - 360, lon)   # convert 0-360 to -180/180
-    lat = np.atleast_1d(geom.latitude)[idx]
+    lat = np.atleast_1d(geom.latitude)
 
     coords = [(lo, la) for lo, la in zip(lon, lat)]
     line   = LineString(coords).simplify(0.001, preserve_topology=False)
