@@ -290,8 +290,7 @@ def process_file(sci_file, cursor, spice, inst_id, body_id, geod):
     to 1-second UTC intervals (preserving first and last samples), applies
     Ramer-Douglas-Peucker simplification (tolerance=0.001 degrees) to reduce point
     count while preserving track shape, converts longitudes from 0-360 to -180/180
-    convention, then computes
-    sub-spacecraft ground track geometry and
+    convention, then computes sub-spacecraft ground track geometry and
     illumination angles using SPICE via GRaSP, constructs a WKT LineString
     from the resulting longitude/latitude pairs, computes duration, geodesic
     ground track length, mean altitude, and solar zenith angles, and executes
