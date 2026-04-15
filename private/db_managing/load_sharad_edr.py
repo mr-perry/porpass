@@ -4,7 +4,9 @@
 This script reads SHARAD auxiliary files from the MRO PDS EDR archive,
 downloading them from the PDS Geosciences Node if not already cached locally,
 computes sub-spacecraft ground track geometry using SPICE kernels via GRaSP,
-decimates the ground track to 1-second intervals to control geometry size, and
+decimates the ground track to 1-second intervals, applies Ramer-Douglas-Peucker
+simplification (tolerance=0.001°) to reduce point count while preserving track shape,
+converts longitudes from 0-360 to -180/180 convention, and
 inserts one observation row per auxiliary file into the PORPASS observations
 table.
 
@@ -447,10 +449,11 @@ def process_row(row, cursor, spice, geod):
     # Decimate to ~1-second intervals before constructing the LineString
     idx = decimate_et(et)
     lon = np.atleast_1d(geom.longitude)[idx]
+    lon = np.where(lon > 180, lon - 360, lon)   # convert 0-360 to -180/180
     lat = np.atleast_1d(geom.latitude)[idx]
 
     coords = [(lo, la) for lo, la in zip(lon, lat)]
-    line   = LineString(coords)
+    line   = LineString(coords).simplify(0.001, preserve_topology=False)
 
     duration  = float((et[-1] - et[0]))
     length_km = geodesic_length_km(lon, lat, geod)

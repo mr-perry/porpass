@@ -287,9 +287,10 @@ def process_file(sci_file, cursor, spice, inst_id, body_id, geod):
     """Process a single LRS science file and insert one observation row.
 
     Reads an LRS waveform science file, decimates the observation time array
-    to 1-second UTC intervals (preserving first and last samples) to reduce
-    geometry density to a level appropriate for GIS display, computes
-    sub-spacecraft ground track geometry and
+    to 1-second UTC intervals (preserving first and last samples), applies
+    Ramer-Douglas-Peucker simplification (tolerance=0.001 degrees) to reduce point
+    count while preserving track shape, converts longitudes from 0-360 to -180/180
+    convention, then computes sub-spacecraft ground track geometry and
     illumination angles using SPICE via GRaSP, constructs a WKT LineString
     from the resulting longitude/latitude pairs, computes duration, geodesic
     ground track length, mean altitude, and solar zenith angles, and executes
@@ -364,6 +365,7 @@ def process_file(sci_file, cursor, spice, inst_id, body_id, geod):
     geom = grasp.compute_geometry(vctrs.r_t, vctrs.r_s, vctrs.r_st)
 
     lon = np.atleast_1d(geom.longitude)
+    lon = np.where(lon > 180, lon - 360, lon)   # convert 0-360 to -180/180
     lat = np.atleast_1d(geom.latitude)
     if len(lon) < 2:
         logging.warning(
@@ -373,7 +375,7 @@ def process_file(sci_file, cursor, spice, inst_id, body_id, geod):
         return False
 
     coords        = [(lo, la) for lo, la in zip(lon, lat)]
-    line          = LineString(coords)
+    line          = LineString(coords).simplify(0.001, preserve_topology=False)
     start_time    = pd.Timestamp(et[0])
     stop_time     = pd.Timestamp(et[-1])
     duration      = (stop_time - start_time).total_seconds()
