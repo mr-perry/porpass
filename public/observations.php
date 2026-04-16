@@ -56,7 +56,7 @@ $current_page = 1;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $searched = true;
-
+    file_put_contents('/tmp/porpass_post.txt', print_r($_POST, true));
     // Pagination and sorting
     $per_page     = in_array((int)($_POST['per_page'] ?? 50), [25, 50, 100]) ? (int)$_POST['per_page'] : 50;
     $current_page = max(1, (int)($_POST['page'] ?? 1));
@@ -91,6 +91,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $marsis_forms = $_POST['marsis_forms'] ?? [];
     $alt_min      = $_POST['alt_min']      !== '' ? (float)$_POST['alt_min']  : null;
     $alt_max      = $_POST['alt_max']      !== '' ? (float)$_POST['alt_max']  : null;
+    $orbit_min    = $_POST['orbit_min']    !== '' ? (int)$_POST['orbit_min']  : null;
+    $orbit_max    = $_POST['orbit_max']    !== '' ? (int)$_POST['orbit_max']  : null;
 
     try {
         $q = new observationQuery($db);
@@ -116,12 +118,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($max_roll !== null) $q->setMaxRoll($max_roll);
             $q->setSzaRange($sza_min, $sza_max);
             $q->setLsRange($ls_min, $ls_max);
+            $q->setOrbitRange($orbit_min, $orbit_max);
         } elseif ($instrument_id === 3) {
             if (!empty($marsis_modes)) $q->setMarsisModes($marsis_modes);
             if (!empty($marsis_forms)) $q->setMarsisForms($marsis_forms);
             $q->setSzaRange($sza_min, $sza_max);
             $q->setLsRange($ls_min, $ls_max);
             $q->setAltitudeRange($alt_min, $alt_max);
+            $q->setOrbitRange($orbit_min, $orbit_max);
         }
 
         $q->setOrderBy($sort_col, $sort_dir);
@@ -321,6 +325,18 @@ open_layout('Browse Observations');
                                value="<?= htmlspecialchars($_POST['max_roll'] ?? '') ?>">
                     </div>
                     <div class="col-md-4">
+                        <label class="form-label fw-semibold">Orbit Number</label>
+                        <div class="input-group">
+                            <input type="number" name="orbit_min" class="form-control"
+                                   placeholder="Min" step="1" min="0"
+                                   value="<?= htmlspecialchars($_POST['orbit_min'] ?? '') ?>">
+                            <span class="input-group-text">–</span>
+                            <input type="number" name="orbit_max" class="form-control"
+                                   placeholder="Max" step="1" min="0"
+                                   value="<?= htmlspecialchars($_POST['orbit_max'] ?? '') ?>">
+                        </div>
+                    </div>
+                    <div class="col-md-4">
                         <label class="form-label fw-semibold">Solar Zenith Angle (°)</label>
                         <div class="input-group">
                             <input type="number" name="sza_min" class="form-control"
@@ -422,6 +438,18 @@ open_layout('Browse Observations');
                             <input type="number" name="alt_max" class="form-control"
                                    placeholder="Max" step="1" min="0"
                                    value="<?= htmlspecialchars($_POST['alt_max'] ?? '') ?>">
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold">Orbit Number</label>
+                        <div class="input-group">
+                            <input type="number" name="orbit_min" class="form-control"
+                                   placeholder="Min" step="1" min="0"
+                                   value="<?= htmlspecialchars($_POST['orbit_min'] ?? '') ?>">
+                            <span class="input-group-text">–</span>
+                            <input type="number" name="orbit_max" class="form-control"
+                                   placeholder="Max" step="1" min="0"
+                                   value="<?= htmlspecialchars($_POST['orbit_max'] ?? '') ?>">
                         </div>
                     </div>
                 </div>
@@ -651,10 +679,20 @@ function updateInstrumentFilters() {
     const instId = parseInt(document.getElementById('instrument_id').value) || 0;
     document.querySelectorAll('.instrument-filters').forEach(el => {
         el.style.display = 'none';
+        el.querySelectorAll('input, select').forEach(inp => inp.disabled = true);
     });
-    if (instId === 1) document.getElementById('lrs-filters').style.display    = 'block';
-    if (instId === 2) document.getElementById('sharad-filters').style.display = 'block';
-    if (instId === 3) document.getElementById('marsis-filters').style.display = 'block';
+    if (instId === 1) {
+        document.getElementById('lrs-filters').style.display = 'block';
+        document.getElementById('lrs-filters').querySelectorAll('input, select').forEach(inp => inp.disabled = false);
+    }
+    if (instId === 2) {
+        document.getElementById('sharad-filters').style.display = 'block';
+        document.getElementById('sharad-filters').querySelectorAll('input, select').forEach(inp => inp.disabled = false);
+    }
+    if (instId === 3) {
+        document.getElementById('marsis-filters').style.display = 'block';
+        document.getElementById('marsis-filters').querySelectorAll('input, select').forEach(inp => inp.disabled = false);
+    }
 }
 
 document.getElementById('body_id').addEventListener('change', updateInstruments);

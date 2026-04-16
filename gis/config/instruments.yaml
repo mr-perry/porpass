@@ -64,11 +64,18 @@ instruments:
         field: max_roll
         min: 0
         max: 120
+      - id: orbit_number
+        label: "Orbit #"
+        type: range
+        field: orbit_number
+        min: 0
+        max: 99999
       - id: bbox
         label: "Lat/Lon BBox"
         type: bbox
     popup_fields:
       - { field: native_id,    label: "Product ID" }
+      - { field: orbit_number, label: "Orbit" }
       - { field: start_time,   label: "Start Time" }
       - { field: stop_time,    label: "Stop Time" }
       - { field: duration,     label: "Duration (s)" }
@@ -138,11 +145,18 @@ instruments:
         type: dropdown
         field: form_name
         options: ["RAW", "UNC", "IND", "CMP"]
+      - id: orbit_number
+        label: "Orbit #"
+        type: range
+        field: orbit_number
+        min: 0
+        max: 99999
       - id: bbox
         label: "Lat/Lon BBox"
         type: bbox
     popup_fields:
       - { field: native_id,    label: "Product ID" }
+      - { field: orbit_number, label: "Orbit" }
       - { field: start_time,   label: "Start Time" }
       - { field: stop_time,    label: "Stop Time" }
       - { field: duration,     label: "Duration (s)" }
@@ -213,11 +227,18 @@ instruments:
         type: dropdown
         field: form_name
         options: ["RAW", "UNC", "IND", "CMP"] 
+      - id: orbit_number
+        label: "Orbit #"
+        type: range
+        field: orbit_number
+        min: 0
+        max: 99999
       - id: bbox
         label: "Lat/Lon BBox"
         type: bbox
     popup_fields:
       - { field: native_id,    label: "Product ID" }
+      - { field: orbit_number, label: "Orbit" }
       - { field: start_time,   label: "Start Time" }
       - { field: stop_time,    label: "Stop Time" }
       - { field: duration,     label: "Duration (s)" }

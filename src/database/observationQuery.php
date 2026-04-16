@@ -32,7 +32,7 @@ class observationQuery
     // ── Column whitelist for ORDER BY ─────────────────────────────────────────
     private const SORTABLE_COLUMNS = [
         'start_time', 'stop_time', 'duration', 'length_km',
-        'orbit_number', 'max_roll', 'mean_sza', 'l_s',
+        'native_id', 'orbit_number', 'max_roll', 'mean_sza', 'l_s',
         'start_altitude', 'stop_altitude',
     ];
 
@@ -68,6 +68,8 @@ class observationQuery
     private ?float  $maxRollMax     = null;
     private ?float  $lsMin          = null;
     private ?float  $lsMax          = null;
+    private ?int    $orbitMin       = null;
+    private ?int    $orbitMax       = null;
 
     // MARSIS filters
     private array   $marsisModes    = [];
@@ -233,6 +235,23 @@ class observationQuery
     {
         $this->lsMin = $min;
         $this->lsMax = $max;
+        return $this;
+    }
+
+    /**
+     * Filter by orbit number range (applies to SHARAD and MARSIS).
+     *
+     * Supply both min and max with the same value for an exact match,
+     * or supply only one for an open-ended range.
+     *
+     * @param int|null $min Minimum orbit number (inclusive).
+     * @param int|null $max Maximum orbit number (inclusive).
+     * @return static
+     */
+    public function setOrbitRange(?int $min, ?int $max): static
+    {
+        $this->orbitMin = $min;
+        $this->orbitMax = $max;
         return $this;
     }
 
@@ -434,6 +453,14 @@ class observationQuery
                 $this->wheres[] = 'child.l_s <= ?';
                 $this->params[] = $this->lsMax;
             }
+            if ($this->orbitMin !== null) {
+                $this->wheres[] = 'child.orbit_number >= ?';
+                $this->params[] = $this->orbitMin;
+            }
+            if ($this->orbitMax !== null) {
+                $this->wheres[] = 'child.orbit_number <= ?';
+                $this->params[] = $this->orbitMax;
+            }
         }
 
         // MARSIS-specific filters
@@ -471,6 +498,14 @@ class observationQuery
             if ($this->altMax !== null) {
                 $this->wheres[] = 'child.stop_altitude <= ?';
                 $this->params[] = $this->altMax;
+            }
+            if ($this->orbitMin !== null) {
+                $this->wheres[] = 'child.orbit_number >= ?';
+                $this->params[] = $this->orbitMin;
+            }
+            if ($this->orbitMax !== null) {
+                $this->wheres[] = 'child.orbit_number <= ?';
+                $this->params[] = $this->orbitMax;
             }
         }
     }
