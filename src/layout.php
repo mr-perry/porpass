@@ -14,9 +14,11 @@
  * Observations, Processing). Right side contains Documentation, the Admin
  * dropdown (admin users only), and the username/account dropdown.
  *
- * @param string $title Page title appended to "PORPASS —" in the <title> element.
+ * @param string $title      Page title appended to "PORPASS —" in the <title> element.
+ * @param string $head_extra Optional extra HTML to inject into <head> (CSS, JS, etc.).
+ * @param string $body_class Optional CSS class(es) to add to the <body> element.
  */
-function open_layout(string $title = 'PORPASS'): void {
+function open_layout(string $title = 'PORPASS', string $head_extra = '', string $body_class = ''): void {
     $username = htmlspecialchars($_SESSION['username'] ?? '');
     $role     = $_SESSION['role'] ?? 'user';
     $is_admin = $role === 'admin';
@@ -29,8 +31,9 @@ function open_layout(string $title = 'PORPASS'): void {
     <title>PORPASS — <?= htmlspecialchars($title) ?></title>
     <link href="/resources/css/bootstrap.min.css" rel="stylesheet">
     <link href="/resources/css/porpass.css"       rel="stylesheet">
+    <?= $head_extra ?>
 </head>
-<body>
+<body<?= $body_class ? ' class="' . htmlspecialchars($body_class) . '"' : '' ?>>
 
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
     <div class="container-fluid">
@@ -62,6 +65,10 @@ function open_layout(string $title = 'PORPASS'): void {
 
                 <li class="nav-item">
                     <a class="nav-link" href="/observations.php">Browse Observations</a>
+                </li>
+
+                <li class="nav-item">
+                    <a class="nav-link" href="/map.php">Map</a>
                 </li>
 
                 <li class="nav-item">

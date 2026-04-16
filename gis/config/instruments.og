@@ -1,0 +1,82 @@
+# Instrument and filter configuration.
+# The frontend filter panel is driven entirely from this file.
+# Never hardcode filter attributes in frontend or backend code.
+#
+# Database connection:
+#   The backend connects to a MariaDB instance using credentials supplied
+#   via environment variables (DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD).
+#   There are no local DB files — the "db" field below is retained as a
+#   reference label only and is no longer used to open a file.
+#   Final table names are TBC with the data team.
+
+instruments:
+
+  - id: sharad
+    label: "SHARAD"
+    body: mars
+    db: sharad          # MariaDB table name TBC
+    table: sharad_tracks
+    enabled: true
+    filters:
+      - id: ls_range
+        label: "Ls range"
+        type: range
+        field: Ls
+        min: 0
+        max: 360
+      - id: max_sza
+        label: "Max SZA"
+        type: range
+        field: maxSZA
+        min: 0
+        max: 180
+      - id: presum
+        label: "Presum"
+        type: dropdown
+        field: Presum
+        options: []        # populated at runtime from DB distinct values
+      - id: max_roll
+        label: "Max Roll"
+        type: range
+        field: maxRoll
+        min: 0
+        max: 120
+      - id: bbox
+        label: "Lat/Lon BBox"
+        type: bbox
+    popup_fields:
+      - { field: ProdID,    label: "Product ID" }
+      - { field: Date,      label: "Date" }
+      - { field: Ls,        label: "Ls" }
+      - { field: maxSZA,    label: "Max SZA" }
+      - { field: Presum,    label: "Presum" }
+      - { field: maxRoll,   label: "Max Roll" }
+      - { field: Error,     label: "Error" }
+      - { field: ErrorNote, label: "Error Note" }
+
+  - id: marsis
+    label: "MARSIS"
+    body: mars
+    db: marsis             # MariaDB table name TBC
+    table: marsis_tracks
+    enabled: false
+    filters: []            # placeholder
+    popup_fields: []       # placeholder
+
+  - id: lrs
+    label: "LRS/Kaguya"
+    body: moon
+    db: lrs                # MariaDB table name TBC
+    table: lrs_tracks
+    enabled: false
+    filters: []            # placeholder
+    popup_fields: []       # placeholder
+
+  - id: marsis_phobos
+    label: "MARSIS (Phobos)"
+    body: phobos
+    db: marsis_phobos      # MariaDB table name TBC
+    table: marsis_phobos_tracks
+    enabled: false
+    filters: []            # placeholder
+    popup_fields: []       # placeholder
