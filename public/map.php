@@ -273,6 +273,33 @@ $head_extra = <<<'HEAD'
       box-sizing: border-box;
     }
 
+    /* Browse Details link */
+    #porpass-map-wrap .browse-link {
+      display: block;
+      text-align: center;
+      margin-top: 8px;
+      padding: 5px 0;
+      border: 1px solid #555;
+      border-radius: 3px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #999;
+      text-decoration: none;
+      cursor: default;
+      pointer-events: none;
+      font-family: Arial, sans-serif;
+    }
+    #porpass-map-wrap .browse-link.active {
+      color: #ff8c00;
+      border-color: #c96d00;
+      cursor: pointer;
+      pointer-events: auto;
+    }
+    #porpass-map-wrap .browse-link.active:hover {
+      background: rgba(201, 109, 0, 0.15);
+      color: #ffaa33;
+    }
+
     /* Planet toggle */
     #porpass-map-wrap .planet-toggle {
       display: flex;
@@ -551,6 +578,9 @@ open_layout('Map', $head_extra, 'page-map');
         <input type="number" id="gis-bbox-max-lon" min="-180" max="180" step="0.01" placeholder="180">
       </div>
     </div>
+
+    <!-- Browse Details link — greyed out until filters are applied -->
+    <a id="gis-browse-link" class="browse-link" href="#">Browse Details</a>
 
   </div>
 
@@ -1245,6 +1275,7 @@ open_layout('Map', $head_extra, 'page-map');
     } catch (err) {
       console.warn('Count fetch failed:', err);
     }
+    updateBrowseLink();
   }
 
   function resetFilters(instId) {
@@ -1273,6 +1304,7 @@ open_layout('Map', $head_extra, 'page-map');
     if (inst.source) inst.source.clear(true);
     document.getElementById('inst-f-count-' + instId).textContent =
       'Apply filters to load tracks.';
+    updateBrowseLink();
   }
 
   // -----------------------------------------------------------------------
@@ -1361,13 +1393,194 @@ open_layout('Map', $head_extra, 'page-map');
   }
 
   // -----------------------------------------------------------------------
-  // 13. Init
+  // 13. Browse Details link (GIS → observations.php)
   // -----------------------------------------------------------------------
-  initBasemapSwitcher();
-  initInstrumentPanel();
+
+  /** GIS instrument ID → PHP instrument_id and body_id */
+  var GIS_TO_PHP = {
+    sharad:        { instrument_id: 2, body_id: 1 },
+    marsis:        { instrument_id: 3, body_id: 1 },
+    marsis_phobos: { instrument_id: 3, body_id: 4 },
+    lrs:           { instrument_id: 1, body_id: 3 },
+  };
+
+  /** PHP instrument_id + body_id → GIS instrument ID */
+  var PHP_TO_GIS = {
+    '2_1': 'sharad',
+    '3_1': 'marsis',
+    '3_4': 'marsis_phobos',
+    '1_3': 'lrs',
+  };
+
+  /**
+   * Build a URL to observations.php that reproduces the current GIS filters.
+   * observations.php uses GET params (same names as its POST params).
+   */
+  function buildBrowseUrl() {
+    var enabledInsts = Object.keys(instruments).filter(function (id) {
+      return instruments[id].enabled && instruments[id].initialLoadDone;
+    });
+    if (enabledInsts.length === 0) return null;
+
+    var params = new URLSearchParams();
+
+    // Use the first enabled instrument for body/instrument selection
+    // (observations.php can only filter one instrument at a time)
+    var firstInst = enabledInsts[0];
+    var mapping   = GIS_TO_PHP[firstInst];
+    if (mapping) {
+      params.set('body_id',       mapping.body_id);
+      params.set('instrument_id', mapping.instrument_id);
+    }
+
+    // Bounding box — prefer user-specified, fall back to viewport
+    var bboxStr = getUserBbox() || getViewBbox();
+    if (bboxStr) {
+      var bp = bboxStr.split(',');
+      params.set('bbox_min_lon', bp[0]);
+      params.set('bbox_min_lat', bp[1]);
+      params.set('bbox_max_lon', bp[2]);
+      params.set('bbox_max_lat', bp[3]);
+    }
+
+    // Translate GIS filter params to observations.php param names
+    var inst = instruments[firstInst];
+    if (inst.activeFilters) {
+      var gisParams = new URLSearchParams(inst.activeFilters);
+
+      // Field name mapping: GIS API → observations.php POST
+      var fieldMap = {
+        'mean_sza_min': 'sza_min',
+        'mean_sza_max': 'sza_max',
+        'l_s_min':      'ls_min',
+        'l_s_max':      'ls_max',
+        'max_roll_max': 'max_roll',
+        'orbit_number_min': 'orbit_min',
+        'orbit_number_max': 'orbit_max',
+      };
+
+      gisParams.forEach(function (val, key) {
+        var phpKey = fieldMap[key] || key;
+        if (key === 'presum') {
+          params.append('presums[]', val);
+        } else {
+          params.set(phpKey, val);
+        }
+      });
+    }
+
+    return '/observations.php?' + params.toString();
+  }
+
+  /** Update the Browse Details link state — active or greyed out. */
+  function updateBrowseLink() {
+    var link = document.getElementById('gis-browse-link');
+    var url  = buildBrowseUrl();
+    if (url) {
+      link.href = url;
+      link.classList.add('active');
+    } else {
+      link.href = '#';
+      link.classList.remove('active');
+    }
+  }
 
   // -----------------------------------------------------------------------
-  // 14. Info modal
+  // 14. URL parameter handling (observations.php → GIS)
+  // -----------------------------------------------------------------------
+
+  /**
+   * Read URL query parameters and auto-configure the map.
+   * Expected params: planet, instruments (comma-separated GIS IDs),
+   * bbox (minlon,minlat,maxlon,maxlat), plus any filter params.
+   */
+  async function applyUrlParams() {
+    var params = new URLSearchParams(window.location.search);
+    if (!params.has('instruments')) return;
+
+    // Switch planet if needed
+    var planet = params.get('planet');
+    if (planet && planet !== currentPlanet) {
+      switchPlanet(planet);
+    }
+
+    // Wait for instrument panel to initialise
+    await new Promise(function (resolve) { setTimeout(resolve, 300); });
+
+    // Populate bounding box if provided
+    var bbox = params.get('bbox');
+    if (bbox) {
+      var bp = bbox.split(',');
+      if (bp.length === 4) {
+        document.getElementById('gis-bbox-min-lon').value = bp[0];
+        document.getElementById('gis-bbox-min-lat').value = bp[1];
+        document.getElementById('gis-bbox-max-lon').value = bp[2];
+        document.getElementById('gis-bbox-max-lat').value = bp[3];
+      }
+    }
+
+    // Enable each requested instrument and populate its filters
+    var instIds = params.get('instruments').split(',');
+    instIds.forEach(function (instId) {
+      var inst = instruments[instId];
+      if (!inst || !inst.config.enabled) return;
+
+      // Toggle the checkbox on
+      var cb = document.getElementById('inst-toggle-' + instId);
+      if (cb && !cb.checked) {
+        cb.checked = true;
+        enableInstrument(instId);
+      }
+
+      // Wait for filter panel to build, then populate fields
+      setTimeout(function () {
+        if (!inst.filterDefs) return;
+
+        inst.filterDefs.forEach(function (f) {
+          if (f.type === 'range') {
+            if (f.ui === 'max_only') {
+              var maxVal = params.get(f.field + '_max');
+              if (maxVal) {
+                var el = document.getElementById('f-' + instId + '-' + f.id);
+                if (el) el.value = maxVal;
+              }
+            } else {
+              var minVal = params.get(f.field + '_min');
+              var maxVal = params.get(f.field + '_max');
+              if (minVal) {
+                var el = document.getElementById('f-' + instId + '-' + f.id + '-min');
+                if (el) el.value = minVal;
+              }
+              if (maxVal) {
+                var el = document.getElementById('f-' + instId + '-' + f.id + '-max');
+                if (el) el.value = maxVal;
+              }
+            }
+          } else if (f.type === 'dropdown') {
+            var val = params.get(f.field);
+            if (val) {
+              var el = document.getElementById('f-' + instId + '-' + f.id);
+              if (el) el.value = val;
+            }
+          }
+        });
+
+        // Auto-apply filters
+        applyFilters(instId);
+      }, 400);
+    });
+  }
+
+  // -----------------------------------------------------------------------
+  // 15. Init
+  // -----------------------------------------------------------------------
+  initBasemapSwitcher();
+  initInstrumentPanel().then(function () {
+    applyUrlParams();
+  });
+
+  // -----------------------------------------------------------------------
+  // 16. Info modal
   // -----------------------------------------------------------------------
   document.getElementById('gis-info-btn').addEventListener('click', function () {
     document.getElementById('gis-info-overlay').style.display = 'flex';

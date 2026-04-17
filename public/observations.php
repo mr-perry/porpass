@@ -45,7 +45,7 @@ $marsis_forms = $db->query(
     'SELECT form_id, form_name FROM marsis_forms ORDER BY form_name'
 )->fetchAll();
 
-// ── Handle form submission ─────────────────────────────────────────────────
+// ── Handle form submission (POST) or GIS link (GET) ─────────────────────
 
 $results      = [];
 $total        = 0;
@@ -54,45 +54,48 @@ $searched     = false;
 $per_page     = 50;
 $current_page = 1;
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+// Accept both POST (form submission) and GET (from GIS "Browse Details" link)
+$input = $_SERVER['REQUEST_METHOD'] === 'POST' ? $_POST : $_GET;
+
+if (!empty($input) && (isset($input['instrument_id']) || isset($input['body_id']))) {
     $searched = true;
-    file_put_contents('/tmp/porpass_post.txt', print_r($_POST, true));
+    file_put_contents('/tmp/porpass_post.txt', print_r($input, true));
     // Pagination and sorting
-    $per_page     = in_array((int)($_POST['per_page'] ?? 50), [25, 50, 100]) ? (int)$_POST['per_page'] : 50;
-    $current_page = max(1, (int)($_POST['page'] ?? 1));
+    $per_page     = in_array((int)($input['per_page'] ?? 50), [25, 50, 100]) ? (int)($input['per_page'] ?? 50) : 50;
+    $current_page = max(1, (int)($input['page'] ?? 1));
     $offset       = ($current_page - 1) * $per_page;
-    $sort_col     = $_POST['sort_col']  ?? 'start_time';
-    $sort_dir     = ($_POST['sort_dir'] ?? 'DESC') === 'ASC' ? 'ASC' : 'DESC';
+    $sort_col     = $input['sort_col']  ?? 'start_time';
+    $sort_dir     = ($input['sort_dir'] ?? 'DESC') === 'ASC' ? 'ASC' : 'DESC';
 
     // Core filters
-    $instrument_id = !empty($_POST['instrument_id']) ? (int)$_POST['instrument_id'] : null;
-    $body_id       = !empty($_POST['body_id'])       ? (int)$_POST['body_id']       : null;
-    $product_type  = !empty($_POST['product_type'])  ? $_POST['product_type']        : null;
-    $date_start    = !empty($_POST['date_start'])    ? $_POST['date_start']          : null;
-    $date_end      = !empty($_POST['date_end'])      ? $_POST['date_end']            : null;
-    $length_min    = $_POST['length_min'] !== '' ? (float)$_POST['length_min'] : null;
-    $length_max    = $_POST['length_max'] !== '' ? (float)$_POST['length_max'] : null;
+    $instrument_id = !empty($input['instrument_id']) ? (int)$input['instrument_id'] : null;
+    $body_id       = !empty($input['body_id'])       ? (int)$input['body_id']       : null;
+    $product_type  = !empty($input['product_type'])  ? $input['product_type']        : null;
+    $date_start    = !empty($input['date_start'])    ? $input['date_start']          : null;
+    $date_end      = !empty($input['date_end'])      ? $input['date_end']            : null;
+    $length_min    = ($input['length_min'] ?? '') !== '' ? (float)$input['length_min'] : null;
+    $length_max    = ($input['length_max'] ?? '') !== '' ? (float)$input['length_max'] : null;
 
     // Bounding box
-    $bbox_min_lat  = $_POST['bbox_min_lat'] !== '' ? (float)$_POST['bbox_min_lat'] : null;
-    $bbox_max_lat  = $_POST['bbox_max_lat'] !== '' ? (float)$_POST['bbox_max_lat'] : null;
-    $bbox_min_lon  = $_POST['bbox_min_lon'] !== '' ? (float)$_POST['bbox_min_lon'] : null;
-    $bbox_max_lon  = $_POST['bbox_max_lon'] !== '' ? (float)$_POST['bbox_max_lon'] : null;
+    $bbox_min_lat  = ($input['bbox_min_lat'] ?? '') !== '' ? (float)$input['bbox_min_lat'] : null;
+    $bbox_max_lat  = ($input['bbox_max_lat'] ?? '') !== '' ? (float)$input['bbox_max_lat'] : null;
+    $bbox_min_lon  = ($input['bbox_min_lon'] ?? '') !== '' ? (float)$input['bbox_min_lon'] : null;
+    $bbox_max_lon  = ($input['bbox_max_lon'] ?? '') !== '' ? (float)$input['bbox_max_lon'] : null;
 
     // Instrument-specific filters
-    $lrs_modes    = $_POST['lrs_modes']    ?? [];
-    $sza_min      = $_POST['sza_min']      !== '' ? (float)$_POST['sza_min']  : null;
-    $sza_max      = $_POST['sza_max']      !== '' ? (float)$_POST['sza_max']  : null;
-    $presums      = $_POST['presums']      ?? [];
-    $max_roll     = $_POST['max_roll']     !== '' ? (float)$_POST['max_roll'] : null;
-    $ls_min       = $_POST['ls_min']       !== '' ? (float)$_POST['ls_min']   : null;
-    $ls_max       = $_POST['ls_max']       !== '' ? (float)$_POST['ls_max']   : null;
-    $marsis_modes = $_POST['marsis_modes'] ?? [];
-    $marsis_forms = $_POST['marsis_forms'] ?? [];
-    $alt_min      = $_POST['alt_min']      !== '' ? (float)$_POST['alt_min']  : null;
-    $alt_max      = $_POST['alt_max']      !== '' ? (float)$_POST['alt_max']  : null;
-    $orbit_min    = $_POST['orbit_min']    !== '' ? (int)$_POST['orbit_min']  : null;
-    $orbit_max    = $_POST['orbit_max']    !== '' ? (int)$_POST['orbit_max']  : null;
+    $lrs_modes    = $input['lrs_modes']    ?? [];
+    $sza_min      = ($input['sza_min'] ?? '')  !== '' ? (float)$input['sza_min']  : null;
+    $sza_max      = ($input['sza_max'] ?? '')  !== '' ? (float)$input['sza_max']  : null;
+    $presums      = $input['presums']      ?? [];
+    $max_roll     = ($input['max_roll'] ?? '')  !== '' ? (float)$input['max_roll'] : null;
+    $ls_min       = ($input['ls_min'] ?? '')    !== '' ? (float)$input['ls_min']   : null;
+    $ls_max       = ($input['ls_max'] ?? '')    !== '' ? (float)$input['ls_max']   : null;
+    $marsis_modes = $input['marsis_modes'] ?? [];
+    $marsis_forms = $input['marsis_forms'] ?? [];
+    $alt_min      = ($input['alt_min'] ?? '')   !== '' ? (float)$input['alt_min']  : null;
+    $alt_max      = ($input['alt_max'] ?? '')   !== '' ? (float)$input['alt_max']  : null;
+    $orbit_min    = ($input['orbit_min'] ?? '')  !== '' ? (int)$input['orbit_min']  : null;
+    $orbit_max    = ($input['orbit_max'] ?? '')  !== '' ? (int)$input['orbit_max']  : null;
 
     try {
         $q = new observationQuery($db);
@@ -177,7 +180,7 @@ open_layout('Browse Observations');
                         <option value="<?= $body['body_id'] ?>"
                             data-instruments="<?= htmlspecialchars($body['instrument_ids']) ?>"
                             data-instrument-names="<?= htmlspecialchars($body['instrument_abbrs']) ?>"
-                            <?= (($_POST['body_id'] ?? '') == $body['body_id']) ? 'selected' : '' ?>>
+                            <?= (($input['body_id'] ?? '') == $body['body_id']) ? 'selected' : '' ?>>
                             <?= htmlspecialchars($body['body_name']) ?>
                         </option>
                         <?php endforeach; ?>
@@ -194,10 +197,10 @@ open_layout('Browse Observations');
                     <label class="form-label fw-semibold">Product Type</label>
                     <select name="product_type" id="product_type" class="form-select">
                         <option value="">— Any —</option>
-                        <option value="EDR" <?= (($_POST['product_type'] ?? '') === 'EDR') ? 'selected' : '' ?>>EDR</option>
-                        <option value="RDR" <?= (($_POST['product_type'] ?? '') === 'RDR') ? 'selected' : '' ?>>RDR</option>
-                        <option value="SCS" <?= (($_POST['product_type'] ?? '') === 'SCS') ? 'selected' : '' ?>>SCS</option>
-                        <option value="CSC" <?= (($_POST['product_type'] ?? '') === 'CSC') ? 'selected' : '' ?>>CSC</option>
+                        <option value="EDR" <?= (($input['product_type'] ?? '') === 'EDR') ? 'selected' : '' ?>>EDR</option>
+                        <option value="RDR" <?= (($input['product_type'] ?? '') === 'RDR') ? 'selected' : '' ?>>RDR</option>
+                        <option value="SCS" <?= (($input['product_type'] ?? '') === 'SCS') ? 'selected' : '' ?>>SCS</option>
+                        <option value="CSC" <?= (($input['product_type'] ?? '') === 'CSC') ? 'selected' : '' ?>>CSC</option>
                     </select>
                 </div>
                 <div class="col-md-3">
@@ -205,11 +208,11 @@ open_layout('Browse Observations');
                     <div class="input-group">
                         <input type="number" name="length_min" class="form-control"
                                placeholder="Min" step="0.1" min="0"
-                               value="<?= htmlspecialchars($_POST['length_min'] ?? '') ?>">
+                               value="<?= htmlspecialchars($input['length_min'] ?? '') ?>">
                         <span class="input-group-text">–</span>
                         <input type="number" name="length_max" class="form-control"
                                placeholder="Max" step="0.1" min="0"
-                               value="<?= htmlspecialchars($_POST['length_max'] ?? '') ?>">
+                               value="<?= htmlspecialchars($input['length_max'] ?? '') ?>">
                     </div>
                 </div>
             </div>
@@ -219,12 +222,12 @@ open_layout('Browse Observations');
                 <div class="col-md-3">
                     <label class="form-label fw-semibold">Start Date</label>
                     <input type="date" name="date_start" class="form-control"
-                           value="<?= htmlspecialchars($_POST['date_start'] ?? '') ?>">
+                           value="<?= htmlspecialchars($input['date_start'] ?? '') ?>">
                 </div>
                 <div class="col-md-3">
                     <label class="form-label fw-semibold">End Date</label>
                     <input type="date" name="date_end" class="form-control"
-                           value="<?= htmlspecialchars($_POST['date_end'] ?? '') ?>">
+                           value="<?= htmlspecialchars($input['date_end'] ?? '') ?>">
                 </div>
             </div>
 
@@ -234,32 +237,32 @@ open_layout('Browse Observations');
                    href="#bbox-section" role="button" aria-expanded="false">
                     ▸ Geographic Bounding Box (optional)
                 </a>
-                <div class="collapse <?= (!empty($_POST['bbox_min_lat'])) ? 'show' : '' ?>"
+                <div class="collapse <?= (!empty($input['bbox_min_lat'])) ? 'show' : '' ?>"
                      id="bbox-section">
                     <div class="row g-3 mt-1">
                         <div class="col-md-3">
                             <label class="form-label">Min Latitude</label>
                             <input type="number" name="bbox_min_lat" class="form-control"
                                    placeholder="-90" step="0.001" min="-90" max="90"
-                                   value="<?= htmlspecialchars($_POST['bbox_min_lat'] ?? '') ?>">
+                                   value="<?= htmlspecialchars($input['bbox_min_lat'] ?? '') ?>">
                         </div>
                         <div class="col-md-3">
                             <label class="form-label">Max Latitude</label>
                             <input type="number" name="bbox_max_lat" class="form-control"
                                    placeholder="90" step="0.001" min="-90" max="90"
-                                   value="<?= htmlspecialchars($_POST['bbox_max_lat'] ?? '') ?>">
+                                   value="<?= htmlspecialchars($input['bbox_max_lat'] ?? '') ?>">
                         </div>
                         <div class="col-md-3">
                             <label class="form-label">Min Longitude</label>
                             <input type="number" name="bbox_min_lon" class="form-control"
                                    placeholder="-180" step="0.001" min="-180" max="180"
-                                   value="<?= htmlspecialchars($_POST['bbox_min_lon'] ?? '') ?>">
+                                   value="<?= htmlspecialchars($input['bbox_min_lon'] ?? '') ?>">
                         </div>
                         <div class="col-md-3">
                             <label class="form-label">Max Longitude</label>
                             <input type="number" name="bbox_max_lon" class="form-control"
                                    placeholder="180" step="0.001" min="-180" max="180"
-                                   value="<?= htmlspecialchars($_POST['bbox_max_lon'] ?? '') ?>">
+                                   value="<?= htmlspecialchars($input['bbox_max_lon'] ?? '') ?>">
                         </div>
                     </div>
                 </div>
@@ -278,7 +281,7 @@ open_layout('Browse Observations');
                                 <input class="form-check-input" type="checkbox"
                                        name="lrs_modes[]" value="<?= $mode ?>"
                                        id="lrs_<?= $mode ?>"
-                                       <?= in_array($mode, $_POST['lrs_modes'] ?? []) ? 'checked' : '' ?>>
+                                       <?= in_array($mode, $input['lrs_modes'] ?? []) ? 'checked' : '' ?>>
                                 <label class="form-check-label" for="lrs_<?= $mode ?>"><?= $mode ?></label>
                             </div>
                             <?php endforeach; ?>
@@ -289,11 +292,11 @@ open_layout('Browse Observations');
                         <div class="input-group">
                             <input type="number" name="sza_min" class="form-control"
                                    placeholder="Min" step="0.1" min="0" max="180"
-                                   value="<?= htmlspecialchars($_POST['sza_min'] ?? '') ?>">
+                                   value="<?= htmlspecialchars($input['sza_min'] ?? '') ?>">
                             <span class="input-group-text">–</span>
                             <input type="number" name="sza_max" class="form-control"
                                    placeholder="Max" step="0.1" min="0" max="180"
-                                   value="<?= htmlspecialchars($_POST['sza_max'] ?? '') ?>">
+                                   value="<?= htmlspecialchars($input['sza_max'] ?? '') ?>">
                         </div>
                     </div>
                 </div>
@@ -312,7 +315,7 @@ open_layout('Browse Observations');
                                 <input class="form-check-input" type="checkbox"
                                        name="presums[]" value="<?= $p ?>"
                                        id="presum_<?= $p ?>"
-                                       <?= in_array($p, $_POST['presums'] ?? []) ? 'checked' : '' ?>>
+                                       <?= in_array($p, $input['presums'] ?? []) ? 'checked' : '' ?>>
                                 <label class="form-check-label" for="presum_<?= $p ?>"><?= $p ?></label>
                             </div>
                             <?php endforeach; ?>
@@ -322,18 +325,18 @@ open_layout('Browse Observations');
                         <label class="form-label fw-semibold">Max Roll ≤ (°)</label>
                         <input type="number" name="max_roll" class="form-control"
                                placeholder="e.g. 20" step="0.1"
-                               value="<?= htmlspecialchars($_POST['max_roll'] ?? '') ?>">
+                               value="<?= htmlspecialchars($input['max_roll'] ?? '') ?>">
                     </div>
                     <div class="col-md-4">
                         <label class="form-label fw-semibold">Orbit Number</label>
                         <div class="input-group">
                             <input type="number" name="orbit_min" class="form-control"
                                    placeholder="Min" step="1" min="0"
-                                   value="<?= htmlspecialchars($_POST['orbit_min'] ?? '') ?>">
+                                   value="<?= htmlspecialchars($input['orbit_min'] ?? '') ?>">
                             <span class="input-group-text">–</span>
                             <input type="number" name="orbit_max" class="form-control"
                                    placeholder="Max" step="1" min="0"
-                                   value="<?= htmlspecialchars($_POST['orbit_max'] ?? '') ?>">
+                                   value="<?= htmlspecialchars($input['orbit_max'] ?? '') ?>">
                         </div>
                     </div>
                     <div class="col-md-4">
@@ -341,11 +344,11 @@ open_layout('Browse Observations');
                         <div class="input-group">
                             <input type="number" name="sza_min" class="form-control"
                                    placeholder="Min" step="0.1" min="0" max="180"
-                                   value="<?= htmlspecialchars($_POST['sza_min'] ?? '') ?>">
+                                   value="<?= htmlspecialchars($input['sza_min'] ?? '') ?>">
                             <span class="input-group-text">–</span>
                             <input type="number" name="sza_max" class="form-control"
                                    placeholder="Max" step="0.1" min="0" max="180"
-                                   value="<?= htmlspecialchars($_POST['sza_max'] ?? '') ?>">
+                                   value="<?= htmlspecialchars($input['sza_max'] ?? '') ?>">
                         </div>
                     </div>
                     <div class="col-md-4">
@@ -353,11 +356,11 @@ open_layout('Browse Observations');
                         <div class="input-group">
                             <input type="number" name="ls_min" class="form-control"
                                    placeholder="Min" step="0.1" min="0" max="360"
-                                   value="<?= htmlspecialchars($_POST['ls_min'] ?? '') ?>">
+                                   value="<?= htmlspecialchars($input['ls_min'] ?? '') ?>">
                             <span class="input-group-text">–</span>
                             <input type="number" name="ls_max" class="form-control"
                                    placeholder="Max" step="0.1" min="0" max="360"
-                                   value="<?= htmlspecialchars($_POST['ls_max'] ?? '') ?>">
+                                   value="<?= htmlspecialchars($input['ls_max'] ?? '') ?>">
                         </div>
                     </div>
                 </div>
@@ -377,7 +380,7 @@ open_layout('Browse Observations');
                                        name="marsis_modes[]"
                                        value="<?= htmlspecialchars($m['mode_name']) ?>"
                                        id="marsis_mode_<?= $m['mode_id'] ?>"
-                                       <?= in_array($m['mode_name'], $_POST['marsis_modes'] ?? []) ? 'checked' : '' ?>>
+                                       <?= in_array($m['mode_name'], $input['marsis_modes'] ?? []) ? 'checked' : '' ?>>
                                 <label class="form-check-label"
                                        for="marsis_mode_<?= $m['mode_id'] ?>">
                                     <?= htmlspecialchars($m['mode_name']) ?>
@@ -395,7 +398,7 @@ open_layout('Browse Observations');
                                        name="marsis_forms[]"
                                        value="<?= htmlspecialchars($f['form_name']) ?>"
                                        id="marsis_form_<?= $f['form_id'] ?>"
-                                       <?= in_array($f['form_name'], $_POST['marsis_forms'] ?? []) ? 'checked' : '' ?>>
+                                       <?= in_array($f['form_name'], $input['marsis_forms'] ?? []) ? 'checked' : '' ?>>
                                 <label class="form-check-label"
                                        for="marsis_form_<?= $f['form_id'] ?>">
                                     <?= htmlspecialchars($f['form_name']) ?>
@@ -409,11 +412,11 @@ open_layout('Browse Observations');
                         <div class="input-group">
                             <input type="number" name="sza_min" class="form-control"
                                    placeholder="Min" step="0.1" min="0" max="180"
-                                   value="<?= htmlspecialchars($_POST['sza_min'] ?? '') ?>">
+                                   value="<?= htmlspecialchars($input['sza_min'] ?? '') ?>">
                             <span class="input-group-text">–</span>
                             <input type="number" name="sza_max" class="form-control"
                                    placeholder="Max" step="0.1" min="0" max="180"
-                                   value="<?= htmlspecialchars($_POST['sza_max'] ?? '') ?>">
+                                   value="<?= htmlspecialchars($input['sza_max'] ?? '') ?>">
                         </div>
                     </div>
                     <div class="col-md-4">
@@ -421,11 +424,11 @@ open_layout('Browse Observations');
                         <div class="input-group">
                             <input type="number" name="ls_min" class="form-control"
                                    placeholder="Min" step="0.1" min="0" max="360"
-                                   value="<?= htmlspecialchars($_POST['ls_min'] ?? '') ?>">
+                                   value="<?= htmlspecialchars($input['ls_min'] ?? '') ?>">
                             <span class="input-group-text">–</span>
                             <input type="number" name="ls_max" class="form-control"
                                    placeholder="Max" step="0.1" min="0" max="360"
-                                   value="<?= htmlspecialchars($_POST['ls_max'] ?? '') ?>">
+                                   value="<?= htmlspecialchars($input['ls_max'] ?? '') ?>">
                         </div>
                     </div>
                     <div class="col-md-4">
@@ -433,11 +436,11 @@ open_layout('Browse Observations');
                         <div class="input-group">
                             <input type="number" name="alt_min" class="form-control"
                                    placeholder="Min" step="1" min="0"
-                                   value="<?= htmlspecialchars($_POST['alt_min'] ?? '') ?>">
+                                   value="<?= htmlspecialchars($input['alt_min'] ?? '') ?>">
                             <span class="input-group-text">–</span>
                             <input type="number" name="alt_max" class="form-control"
                                    placeholder="Max" step="1" min="0"
-                                   value="<?= htmlspecialchars($_POST['alt_max'] ?? '') ?>">
+                                   value="<?= htmlspecialchars($input['alt_max'] ?? '') ?>">
                         </div>
                     </div>
                     <div class="col-md-4">
@@ -445,11 +448,11 @@ open_layout('Browse Observations');
                         <div class="input-group">
                             <input type="number" name="orbit_min" class="form-control"
                                    placeholder="Min" step="1" min="0"
-                                   value="<?= htmlspecialchars($_POST['orbit_min'] ?? '') ?>">
+                                   value="<?= htmlspecialchars($input['orbit_min'] ?? '') ?>">
                             <span class="input-group-text">–</span>
                             <input type="number" name="orbit_max" class="form-control"
                                    placeholder="Max" step="1" min="0"
-                                   value="<?= htmlspecialchars($_POST['orbit_max'] ?? '') ?>">
+                                   value="<?= htmlspecialchars($input['orbit_max'] ?? '') ?>">
                         </div>
                     </div>
                 </div>
@@ -483,6 +486,11 @@ open_layout('Browse Observations');
             <?= number_format($total) ?> observation<?= $total !== 1 ? 's' : '' ?> found
         </strong>
         <div class="d-flex align-items-center gap-2">
+            <?php if ($total > 0): ?>
+            <a href="#" id="view-on-map-btn" class="btn btn-sm btn-outline-warning" title="View results on GIS map">
+                🗺 View on Map
+            </a>
+            <?php endif; ?>
             <label class="form-label mb-0 small text-muted">Per page:</label>
             <select class="form-select form-select-sm" style="width:auto;"
                     onchange="setPerPage(this.value)">
@@ -510,7 +518,7 @@ open_layout('Browse Observations');
                         'length_km'        => 'Length (km)',
                     ];
                     // Add instrument-specific columns
-                    $inst = (int)($_POST['instrument_id'] ?? 0);
+                    $inst = (int)($input['instrument_id'] ?? 0);
                     if ($inst === 1) {
                         $cols['mode']     = 'Mode';
                         $cols['mean_sza'] = 'Mean SZA (°)';
@@ -654,7 +662,7 @@ const allInstruments = {
     ?>
 }
 
-const savedInstrument = <?= json_encode((int)($_POST['instrument_id'] ?? 0)) ?>;
+const savedInstrument = <?= json_encode((int)($input['instrument_id'] ?? 0)) ?>;
 
 function updateInstruments() {
     const bodyId  = parseInt(document.getElementById('body_id').value) || 0;
@@ -730,6 +738,105 @@ document.querySelectorAll('.page-nav').forEach(link => {
         document.getElementById('search-form').submit();
     });
 });
+// ── View on Map ──────────────────────────────────────────────────────────
+
+const viewOnMapBtn = document.getElementById('view-on-map-btn');
+if (viewOnMapBtn) {
+    viewOnMapBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+
+        // Map GIS instrument string IDs and body/planet info from PHP instrument_id
+        const INST_MAP = {
+            1: { gis: 'lrs',    planet: 'moon',   body_id: 3 },
+            2: { gis: 'sharad', planet: 'mars',   body_id: 1 },
+            3: { gis: 'marsis', planet: 'mars',   body_id: 1 },
+        };
+        // MARSIS on Phobos
+        const MARSIS_PHOBOS = { gis: 'marsis_phobos', planet: 'phobos', body_id: 4 };
+
+        const instId = parseInt(document.getElementById('instrument_id').value) || 0;
+        const bodyId = parseInt(document.getElementById('body_id').value) || 0;
+
+        // Determine which GIS instruments to enable
+        var gisInstruments = [];
+        if (instId > 0) {
+            if (instId === 3 && bodyId === 4) {
+                gisInstruments.push(MARSIS_PHOBOS);
+            } else if (INST_MAP[instId]) {
+                gisInstruments.push(INST_MAP[instId]);
+            }
+        } else if (bodyId > 0) {
+            // No specific instrument — enable all for this body
+            Object.values(INST_MAP).forEach(function(m) {
+                if (m.body_id === bodyId) gisInstruments.push(m);
+            });
+            if (bodyId === 4) gisInstruments.push(MARSIS_PHOBOS);
+        }
+
+        if (gisInstruments.length === 0) {
+            alert('Please select a body or instrument before viewing on the map.');
+            return;
+        }
+
+        // Build query params from the active form fields
+        var params = new URLSearchParams();
+        params.set('planet', gisInstruments[0].planet);
+        params.set('instruments', gisInstruments.map(function(g) { return g.gis; }).join(','));
+
+        // Bounding box
+        var bboxMinLat = document.querySelector('[name="bbox_min_lat"]').value;
+        var bboxMaxLat = document.querySelector('[name="bbox_max_lat"]').value;
+        var bboxMinLon = document.querySelector('[name="bbox_min_lon"]').value;
+        var bboxMaxLon = document.querySelector('[name="bbox_max_lon"]').value;
+        if (bboxMinLat && bboxMaxLat && bboxMinLon && bboxMaxLon) {
+            params.set('bbox', bboxMinLon + ',' + bboxMinLat + ',' + bboxMaxLon + ',' + bboxMaxLat);
+        }
+
+        // Instrument-specific filters — translate PHP param names to GIS API names
+        if (instId === 2) {  // SHARAD
+            var szaMin = document.querySelector('#sharad-filters [name="sza_min"]');
+            var szaMax = document.querySelector('#sharad-filters [name="sza_max"]');
+            if (szaMin && szaMin.value) params.set('mean_sza_min', szaMin.value);
+            if (szaMax && szaMax.value) params.set('mean_sza_max', szaMax.value);
+
+            var lsMin = document.querySelector('#sharad-filters [name="ls_min"]');
+            var lsMax = document.querySelector('#sharad-filters [name="ls_max"]');
+            if (lsMin && lsMin.value) params.set('l_s_min', lsMin.value);
+            if (lsMax && lsMax.value) params.set('l_s_max', lsMax.value);
+
+            var maxRoll = document.querySelector('#sharad-filters [name="max_roll"]');
+            if (maxRoll && maxRoll.value) params.set('max_roll_max', maxRoll.value);
+
+            var presums = document.querySelectorAll('#sharad-filters [name="presums[]"]:checked');
+            presums.forEach(function(cb) { params.append('presum', cb.value); });
+
+            var orbitMin = document.querySelector('#sharad-filters [name="orbit_min"]');
+            var orbitMax = document.querySelector('#sharad-filters [name="orbit_max"]');
+            if (orbitMin && orbitMin.value) params.set('orbit_number_min', orbitMin.value);
+            if (orbitMax && orbitMax.value) params.set('orbit_number_max', orbitMax.value);
+
+        } else if (instId === 3) {  // MARSIS
+            var szaMin = document.querySelector('#marsis-filters [name="sza_min"]');
+            var szaMax = document.querySelector('#marsis-filters [name="sza_max"]');
+            if (szaMin && szaMin.value) params.set('mean_sza_min', szaMin.value);
+            if (szaMax && szaMax.value) params.set('mean_sza_max', szaMax.value);
+
+            var lsMin = document.querySelector('#marsis-filters [name="ls_min"]');
+            var lsMax = document.querySelector('#marsis-filters [name="ls_max"]');
+            if (lsMin && lsMin.value) params.set('l_s_min', lsMin.value);
+            if (lsMax && lsMax.value) params.set('l_s_max', lsMax.value);
+
+        } else if (instId === 1) {  // LRS
+            var szaMin = document.querySelector('#lrs-filters [name="sza_min"]');
+            var szaMax = document.querySelector('#lrs-filters [name="sza_max"]');
+            if (szaMin && szaMin.value) params.set('mean_sza_min', szaMin.value);
+            if (szaMax && szaMax.value) params.set('mean_sza_max', szaMax.value);
+        }
+
+        window.location.href = '/map.php?' + params.toString();
+    });
+}
+
 </script>
 
 <?php close_layout(); ?>
