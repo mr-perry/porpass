@@ -244,6 +244,35 @@ $head_extra = <<<'HEAD'
       min-height: 15px;
     }
 
+    /* Shared bounding box filter */
+    #porpass-map-wrap .bbox-section {
+      display: none;
+      margin-top: 4px;
+    }
+    #porpass-map-wrap .bbox-heading {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #888;
+      margin-bottom: 6px;
+    }
+    #porpass-map-wrap .bbox-grid {
+      display: grid;
+      grid-template-columns: auto 1fr auto 1fr;
+      gap: 4px 6px;
+      align-items: center;
+      font-size: 11px;
+    }
+    #porpass-map-wrap .bbox-grid label {
+      color: #999;
+      font-size: 10px;
+      white-space: nowrap;
+    }
+    #porpass-map-wrap .bbox-grid input[type="number"] {
+      width: 100%;
+      box-sizing: border-box;
+    }
+
     /* Planet toggle */
     #porpass-map-wrap .planet-toggle {
       display: flex;
@@ -506,6 +535,22 @@ open_layout('Map', $head_extra, 'page-map');
 
     <!-- Instrument layer toggles — injected dynamically -->
     <div id="instrument-layers"></div>
+
+    <!-- Shared bounding box filter — visible when any instrument is enabled -->
+    <div id="gis-bbox-section" class="bbox-section">
+      <hr class="ctrl-sep">
+      <div class="bbox-heading">Bounding Box (overrides viewport)</div>
+      <div class="bbox-grid">
+        <label for="gis-bbox-min-lat">Min Lat</label>
+        <input type="number" id="gis-bbox-min-lat" min="-90" max="90" step="0.01" placeholder="-90">
+        <label for="gis-bbox-max-lat">Max Lat</label>
+        <input type="number" id="gis-bbox-max-lat" min="-90" max="90" step="0.01" placeholder="90">
+        <label for="gis-bbox-min-lon">Min Lon</label>
+        <input type="number" id="gis-bbox-min-lon" min="-180" max="180" step="0.01" placeholder="-180">
+        <label for="gis-bbox-max-lon">Max Lon</label>
+        <input type="number" id="gis-bbox-max-lon" min="-180" max="180" step="0.01" placeholder="180">
+      </div>
+    </div>
 
   </div>
 
@@ -799,10 +844,40 @@ open_layout('Map', $head_extra, 'page-map');
          + maxlon.toFixed(4) + ',' + ne[1].toFixed(4);
   }
 
+  /**
+   * Read the user-specified bounding box from the four input fields.
+   * Returns a bbox string "minlon,minlat,maxlon,maxlat" if all four
+   * fields are filled, or null otherwise.
+   */
+  function getUserBbox() {
+    var minLat = document.getElementById('gis-bbox-min-lat').value.trim();
+    var maxLat = document.getElementById('gis-bbox-max-lat').value.trim();
+    var minLon = document.getElementById('gis-bbox-min-lon').value.trim();
+    var maxLon = document.getElementById('gis-bbox-max-lon').value.trim();
+    if (minLat === '' || maxLat === '' || minLon === '' || maxLon === '') return null;
+    return minLon + ',' + minLat + ',' + maxLon + ',' + maxLat;
+  }
+
+  /** Show or hide the shared bbox section based on whether any instrument is enabled. */
+  function updateBboxVisibility() {
+    var anyEnabled = Object.keys(instruments).some(function (id) {
+      return instruments[id].enabled;
+    });
+    document.getElementById('gis-bbox-section').style.display = anyEnabled ? 'block' : 'none';
+  }
+
+  /** Clear the user bbox input fields. */
+  function clearUserBbox() {
+    document.getElementById('gis-bbox-min-lat').value = '';
+    document.getElementById('gis-bbox-max-lat').value = '';
+    document.getElementById('gis-bbox-min-lon').value = '';
+    document.getElementById('gis-bbox-max-lon').value = '';
+  }
+
   function buildVectorUrl(instId) {
     var inst  = instruments[instId];
     var parts = [];
-    var bbox  = getViewBbox();
+    var bbox  = getUserBbox() || getViewBbox();
     if (bbox)                  parts.push('bbox=' + bbox);
     if (inst.activeFilters)    parts.push(inst.activeFilters);
     return '/api/vectors/' + instId + (parts.length ? '?' + parts.join('&') : '');
@@ -841,6 +916,7 @@ open_layout('Map', $head_extra, 'page-map');
     map.addLayer(inst.layer);
     inst.enabled = true;
     showFilterPanel(instId);
+    updateBboxVisibility();
     document.getElementById('inst-f-count-' + instId).textContent =
       'Apply filters to load tracks.';
   }
@@ -851,6 +927,7 @@ open_layout('Map', $head_extra, 'page-map');
     clearTimeout(inst.timer);
     if (inst.layer) { map.removeLayer(inst.layer); inst.layer = null; inst.source = null; }
     hideFilterPanel(instId);
+    updateBboxVisibility();
     closePopup();
   }
 
@@ -1136,9 +1213,23 @@ open_layout('Map', $head_extra, 'page-map');
     inst.activeFilters   = buildActiveFilters(instId);
     inst.initialLoadDone = true;
     inst.filterLocked    = true;
+
+    // If the user specified a manual bbox, fit the map view to it
+    var userBbox = getUserBbox();
+    if (userBbox) {
+      var parts = userBbox.split(',').map(Number);  // minlon, minlat, maxlon, maxlat
+      var crs   = map.getView().getProjection().getCode();
+      var sw    = ol.proj.fromLonLat([parts[0], parts[1]], crs);
+      var ne    = ol.proj.fromLonLat([parts[2], parts[3]], crs);
+      map.getView().fit([sw[0], sw[1], ne[0], ne[1]], {
+        padding: [20, 20, 20, 20],
+        duration: 300,
+      });
+    }
+
     fetchInstrument(instId);
 
-    var bbox = getViewBbox();
+    var bbox = userBbox || getViewBbox();
     var countParts = [];
     if (bbox) countParts.push('bbox=' + bbox);
     if (inst.activeFilters) countParts.push(inst.activeFilters);
@@ -1178,6 +1269,7 @@ open_layout('Map', $head_extra, 'page-map');
     inst.activeFilters   = '';
     inst.initialLoadDone = false;
     inst.filterLocked    = false;
+    clearUserBbox();
     if (inst.source) inst.source.clear(true);
     document.getElementById('inst-f-count-' + instId).textContent =
       'Apply filters to load tracks.';
